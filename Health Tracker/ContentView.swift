@@ -5,24 +5,11 @@
 //  Created by Rohan Singh on 6/17/25.
 //
 
-import SwiftUI
-import HealthKit
 
+import SwiftUI
 
 struct ContentView: View {
-    
     var body: some View {
-        VStack {
-            Text("Health Tracker")
-                .font(.largeTitle)
-                .padding()
-        }
+        Text("Content View!")
     }
-}
-
-
-
-
-#Preview {
-    ContentView()
 }
