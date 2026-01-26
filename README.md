@@ -1,17 +1,96 @@
 # Health Tracker
 
-A modern iOS application built with SwiftUI for tracking and monitoring health metrics using Apple's HealthKit framework.
+A modern iOS app built with SwiftUI + HealthKit. Current focus: a **Daily Health Recap** with a sleep-first morning highlight and simple 7-day comparisons.
 
-## Overview
+## Current MVP: Daily Recap Dashboard
 
-Health Tracker is a native iOS app designed to help users monitor their health data by integrating with Apple's HealthKit. The app provides an intuitive interface to view and track various health metrics synced from the Health app.
+**Morning flow**
+- Detect the **sleep session that just ended** (most recent session end time).
+- Best-effort notification at **wakeTime + 20 minutes** with a short sleep highlight.
+- Tap opens `DailyRecapView(date: yesterday)`.
 
-## Features
+**“Yesterday” definition**
+- **Sleep:** the sleep session that just ended (most recent session end).
+- **Movement stats:** the **calendar day before today**, midnight → midnight (local time).
 
-- 🔐 **HealthKit Integration** - Secure access to health data through Apple's HealthKit framework
-- 📱 **Native iOS Experience** - Built with SwiftUI for a modern, responsive user interface
-- 🎨 **Clean Design** - Minimalist and user-friendly interface
-- ✅ **Well-Tested** - Includes unit and UI test suites
+## Daily Recap: MVP Sections
+
+**Sleep (required)**
+- Sleep score
+- Time asleep
+- Time in bed
+- Efficiency
+- Bedtime + wake time
+- Comparison vs 7‑day average
+
+**Movement (required)**
+- Steps
+- Walking distance
+- Active energy
+- Each shows yesterday, 7‑day average, and delta text
+
+**Insight (required)**
+- One sentence summarizing the most meaningful signal across metrics.
+
+**Optional later**
+- Activity rings
+- Resting HR / HRV
+- Workouts / mindful minutes
+
+## Sleep Score (Option A — asymmetric duration)
+
+Goal: **80+ is attainable**, **90+ is hard**.
+
+**Inputs**
+- Duration (asleep)
+- Efficiency (asleep / in bed)
+- Consistency (wake time vs 7‑day average wake time)
+
+**Duration subscore**
+- 7.5–10.5h → 1.0 (no penalty)
+- 6.0–7.5h → 0.7 → 1.0 (linear)
+- 5.0–6.0h → 0.4 → 0.7 (linear)
+- <5.0h → 0.3
+- 10.5–12.0h → 1.0 → 0.6 (linear)
+- >12.0h → 0.5
+
+**Efficiency subscore**
+- ≥95% → 1.0
+- 85–95% → 0.75 → 1.0 (linear)
+- 70–85% → 0.40 → 0.75 (linear)
+- <70% → 0.30
+
+**Consistency subscore (wake time)**
+- ≤20 min → 1.0
+- 20–60 min → 1.0 → 0.6 (linear)
+- 60–120 min → 0.6 → 0.3 (linear)
+- >120 min → 0.2
+
+**Score**
+```
+score = 100 * (0.55*duration + 0.25*efficiency + 0.20*consistency)
+```
+**90+ gate:** if any subscore < 0.85, cap at 89.
+
+## Data Sources (HealthKit)
+
+- Sleep: `HKCategoryTypeIdentifier.sleepAnalysis`
+- Steps: `HKQuantityTypeIdentifier.stepCount`
+- Walking distance: `HKQuantityTypeIdentifier.distanceWalkingRunning`
+- Active energy: `HKQuantityTypeIdentifier.activeEnergyBurned`
+
+## MVP Checklist
+
+**Must have**
+- [ ] Sleep ingestion + score
+- [ ] Steps, distance, active energy ingestion
+- [ ] Daily recap UI with 7‑day comparisons
+- [ ] Morning notification with sleep highlight + deep link
+
+**Nice to have**
+- [ ] Activity rings
+- [ ] Insight selection refinements
+- [ ] Weekly trends view
 
 ## Requirements
 
@@ -19,107 +98,52 @@ Health Tracker is a native iOS app designed to help users monitor their health d
 - Xcode 15.0+
 - Swift 5.0+
 - HealthKit capability enabled
-- Apple Developer Account (for running on physical devices)
+- Apple Developer Account (for device testing)
 
 ## Getting Started
 
-### Prerequisites
-
-1. Install [Xcode](https://developer.apple.com/xcode/) from the App Store
-2. Ensure you have an Apple Developer Account configured in Xcode
-
-### Installation
-
-1. Clone the repository:
-   ```bash
-   git clone <repository-url>
-   cd "Health Tracker"
-   ```
-
-2. Open the project in Xcode:
+1. Open the project in Xcode:
    ```bash
    open "Health Tracker.xcodeproj"
    ```
 
-3. Select your development team in the project settings:
-   - Select the project in the navigator
-   - Go to "Signing & Capabilities"
-   - Choose your team from the dropdown
+2. Set your Development Team in **Signing & Capabilities**.
 
-4. Build and run the project (⌘R)
+3. Build and run (⌘R).
 
-### HealthKit Setup
+## HealthKit Setup
 
-The app requires HealthKit permissions to access health data. When you first run the app, iOS will prompt you to grant access to specific health data types. You can manage these permissions in:
+Make sure your Info.plist contains:
+- `NSHealthShareUsageDescription`
+- `NSHealthUpdateUsageDescription`
 
+Permissions can be managed in:
 **Settings → Privacy & Security → Health → Health Tracker**
 
 ## Project Structure
 
 ```
 Health Tracker/
-├── Health Tracker/              # Main app source code
+├── Health Tracker/              # App source
 │   ├── Health_TrackerApp.swift  # App entry point
-│   ├── ContentView.swift        # Main view
-│   ├── Assets.xcassets/         # App icons and assets
-│   └── Health Tracker.entitlements  # HealthKit entitlements
-├── Health TrackerTests/         # Unit tests
-└── Health TrackerUITests/       # UI tests
+│   ├── ContentView.swift        # Root view
+│   ├── DailyRecapView.swift     # Daily recap UI
+│   ├── HealthKitManager.swift   # HealthKit access
+│   └── SleepScoreCalculator.swift
+├── Health TrackerTests/
+└── Health TrackerUITests/
 ```
-
-## Technologies
-
-- **SwiftUI** - Modern declarative UI framework
-- **HealthKit** - Apple's health data framework
-- **Swift 5.0** - Programming language
-- **Testing Framework** - Swift's native testing framework
-
-## Development
-
-### Building for Different Platforms
-
-- **Simulator**: Select any iOS simulator from the device menu
-- **Physical Device**: Requires valid provisioning profile and code signing
-
-### Running Tests
-
-- **Unit Tests**: ⌘U or Product → Test
-- **UI Tests**: Included in the test suite
 
 ## Version History
 
 - **1.0** (June 2025) - Initial release
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## License
-
-This project is available for use.
+- **1.1** (In progress) - Daily Recap MVP
 
 ## Author
 
 **Rohan Singh**
 - Created: June 17, 2025
 
-## Future Enhancements
-
-Potential features for future releases:
-- 📊 Detailed health metrics visualization
-- 📈 Trend analysis and insights
-- 🎯 Goal setting and tracking
-- 🔔 Health reminders and notifications
-- 📝 Workout logging
-- 👥 Sharing capabilities
-- 🌙 Sleep tracking
-- 💧 Hydration tracking
-
-## Support
-
-For issues, questions, or suggestions, please open an issue on the repository.
-
 ---
 
-Made with ❤️ using SwiftUI and HealthKit
-
+Made with SwiftUI and HealthKit

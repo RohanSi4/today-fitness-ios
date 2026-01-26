@@ -6,9 +6,6 @@
 //
 
 import SwiftUI
-import HealthKit
-
-
 struct HealthAppView: View {
     @State var selectedTab = "Home"
     
