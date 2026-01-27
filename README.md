@@ -82,10 +82,10 @@ score = 100 * (0.55*duration + 0.25*efficiency + 0.20*consistency)
 ## MVP Checklist
 
 **Must have**
-- [ ] Sleep ingestion + score
-- [ ] Steps, distance, active energy ingestion
-- [ ] Daily recap UI with 7‑day comparisons
-- [ ] Morning notification with sleep highlight + deep link
+- [x] Sleep ingestion + score (HealthKitManager + SleepScoreCalculator)
+- [x] Steps, distance, active energy ingestion
+- [x] Daily recap UI with 7‑day comparisons
+- [x] Morning notification with sleep highlight + deep link (scheduled on app open; background refresh TBD)
 
 **Nice to have**
 - [ ] Activity rings
@@ -128,7 +128,11 @@ Health Tracker/
 │   ├── Health_TrackerApp.swift  # App entry point
 │   ├── ContentView.swift        # Root view
 │   ├── DailyRecapView.swift     # Daily recap UI
+│   ├── DailyRecapViewModel.swift
+│   ├── DailyRecapModels.swift
 │   ├── HealthKitManager.swift   # HealthKit access
+│   ├── NotificationManager.swift
+│   ├── AppState.swift
 │   └── SleepScoreCalculator.swift
 ├── Health TrackerTests/
 └── Health TrackerUITests/

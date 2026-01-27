@@ -40,4 +40,5 @@ struct HealthAppView: View {
 
 #Preview {
     HealthAppView()
+        .environmentObject(AppState())
 }

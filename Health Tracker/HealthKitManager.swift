@@ -43,7 +43,7 @@ final class HealthKitManager {
 
         let readTypes: Set<HKObjectType> = [sleepType, stepsType, distanceType, energyType]
 
-        try await withCheckedThrowingContinuation { continuation in
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             store.requestAuthorization(toShare: [], read: readTypes) { success, error in
                 if let error {
                     continuation.resume(throwing: error)
@@ -64,7 +64,7 @@ final class HealthKitManager {
         let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
         let sortDescriptors = [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)]
 
-        let samples = try await withCheckedThrowingContinuation { continuation in
+        let samples = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[HKCategorySample], Error>) in
             let query = HKSampleQuery(
                 sampleType: sleepType,
                 predicate: predicate,
@@ -101,7 +101,7 @@ final class HealthKitManager {
         let interval = DateComponents(day: 1)
         let unit = unit(for: typeIdentifier)
 
-        return try await withCheckedThrowingContinuation { continuation in
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[Date: Double], Error>) in
             let query = HKStatisticsCollectionQuery(
                 quantityType: quantityType,
                 quantitySamplePredicate: predicate,
@@ -163,30 +163,28 @@ final class HealthKitManager {
         var builder: SleepSessionBuilder?
 
         for sample in sorted {
-            if builder == nil {
-                builder = SleepSessionBuilder(
-                    start: sample.start,
-                    end: sample.end,
-                    asleepDuration: sample.isAsleep ? sample.duration : 0
-                )
-                continue
-            }
-
-            let gap = sample.start.timeIntervalSince(builder?.end ?? sample.start)
-            if gap > sessionGap {
-                if let builder {
-                    sessions.append(builder.build())
+            if var current = builder {
+                let gap = sample.start.timeIntervalSince(current.end)
+                if gap > sessionGap {
+                    sessions.append(current.build())
+                    current = SleepSessionBuilder(
+                        start: sample.start,
+                        end: sample.end,
+                        asleepDuration: sample.isAsleep ? sample.duration : 0
+                    )
+                } else {
+                    current.end = max(current.end, sample.end)
+                    if sample.isAsleep {
+                        current.asleepDuration += sample.duration
+                    }
                 }
-                builder = SleepSessionBuilder(
-                    start: sample.start,
-                    end: sample.end,
-                    asleepDuration: sample.isAsleep ? sample.duration : 0
-                )
+                builder = current
             } else {
-                builder?.end = max(builder?.end ?? sample.end, sample.end)
-                if sample.isAsleep {
-                    builder?.asleepDuration += sample.duration
-                }
+                builder = SleepSessionBuilder(
+                    start: sample.start,
+                    end: sample.end,
+                    asleepDuration: sample.isAsleep ? sample.duration : 0
+                )
             }
         }
 

@@ -1,7 +1,14 @@
 import SwiftUI
 
 struct DailyRecapView: View {
-    @StateObject private var viewModel = DailyRecapViewModel()
+    let targetDate: Date?
+
+    @StateObject private var viewModel: DailyRecapViewModel
+
+    init(targetDate: Date? = nil) {
+        self.targetDate = targetDate
+        _viewModel = StateObject(wrappedValue: DailyRecapViewModel(targetDate: targetDate))
+    }
 
     var body: some View {
         NavigationStack {
@@ -10,6 +17,11 @@ struct DailyRecapView: View {
         }
         .task {
             await viewModel.load()
+        }
+        .onChange(of: targetDate) { newValue in
+            Task {
+                await viewModel.updateTargetDate(newValue)
+            }
         }
     }
 
@@ -32,6 +44,15 @@ struct DailyRecapView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+                Text("Check Health permissions in Settings → Privacy & Security → Health.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Button("Try Again") {
+                    Task {
+                        await viewModel.load()
+                    }
+                }
             }
             .padding()
             .frame(maxWidth: .infinity, maxHeight: .infinity)

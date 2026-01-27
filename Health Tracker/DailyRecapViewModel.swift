@@ -12,6 +12,19 @@ final class DailyRecapViewModel: ObservableObject {
     @Published private(set) var state: State = .idle
 
     private let healthKit = HealthKitManager.shared
+    private let mainSleepMinimum: TimeInterval = 3 * 3600
+    private let recentWindow: TimeInterval = 18 * 3600
+    private var targetDate: Date?
+
+    init(targetDate: Date? = nil) {
+        self.targetDate = targetDate
+    }
+
+    func updateTargetDate(_ date: Date?) async {
+        targetDate = date
+        state = .idle
+        await load()
+    }
 
     func load() async {
         switch state {
@@ -37,26 +50,28 @@ final class DailyRecapViewModel: ObservableObject {
         let calendar = Calendar.current
         let now = Date()
         let todayStart = calendar.startOfDay(for: now)
-        let yesterdayStart = calendar.date(byAdding: .day, value: -1, to: todayStart) ?? todayStart
-        let sevenDaysAgo = calendar.date(byAdding: .day, value: -7, to: todayStart) ?? todayStart
+        let movementDate = targetDate ?? calendar.date(byAdding: .day, value: -1, to: todayStart) ?? todayStart
+        let movementDayStart = calendar.startOfDay(for: movementDate)
+        let rangeEnd = calendar.date(byAdding: .day, value: 1, to: movementDayStart) ?? todayStart
+        let rangeStart = calendar.date(byAdding: .day, value: -7, to: rangeEnd) ?? todayStart
 
         async let stepsDaily = healthKit.fetchDailyCumulativeStatistics(
             for: .stepCount,
-            start: sevenDaysAgo,
-            end: todayStart
+            start: rangeStart,
+            end: rangeEnd
         )
         async let distanceDaily = healthKit.fetchDailyCumulativeStatistics(
             for: .distanceWalkingRunning,
-            start: sevenDaysAgo,
-            end: todayStart
+            start: rangeStart,
+            end: rangeEnd
         )
         async let energyDaily = healthKit.fetchDailyCumulativeStatistics(
             for: .activeEnergyBurned,
-            start: sevenDaysAgo,
-            end: todayStart
+            start: rangeStart,
+            end: rangeEnd
         )
 
-        let sleepRangeStart = calendar.date(byAdding: .day, value: -8, to: todayStart) ?? todayStart
+        let sleepRangeStart = calendar.date(byAdding: .day, value: -8, to: now) ?? now
         async let sleepSessions = healthKit.fetchSleepSessions(start: sleepRangeStart, end: now)
 
         let (stepsMap, distanceMap, energyMap, sessions) = try await (
@@ -66,7 +81,7 @@ final class DailyRecapViewModel: ObservableObject {
             sleepSessions
         )
 
-        guard let latestSession = sessions.max(by: { $0.end < $1.end }) else {
+        guard let latestSession = selectPrimarySleepSession(from: sessions, now: now) else {
             throw HealthKitError.noSleepData
         }
 
@@ -97,21 +112,21 @@ final class DailyRecapViewModel: ObservableObject {
 
         let stepsMetric = MovementMetric(
             title: "Steps",
-            value: stepsMap[yesterdayStart] ?? 0,
+            value: stepsMap[movementDayStart] ?? 0,
             average: averageDailyValue(from: stepsMap, days: 7),
             unit: .count
         )
 
         let distanceMetric = MovementMetric(
             title: "Walking distance",
-            value: distanceMap[yesterdayStart] ?? 0,
+            value: distanceMap[movementDayStart] ?? 0,
             average: averageDailyValue(from: distanceMap, days: 7),
             unit: .meters
         )
 
         let energyMetric = MovementMetric(
             title: "Active energy",
-            value: energyMap[yesterdayStart] ?? 0,
+            value: energyMap[movementDayStart] ?? 0,
             average: averageDailyValue(from: energyMap, days: 7),
             unit: .kilocalories
         )
@@ -119,15 +134,43 @@ final class DailyRecapViewModel: ObservableObject {
         let movement = [stepsMetric, distanceMetric, energyMetric]
         let insight = buildInsight(sleep: sleepSummary, movement: movement)
 
-        return DailyRecap(date: yesterdayStart, sleep: sleepSummary, movement: movement, insight: insight)
+        await NotificationManager.shared.scheduleSleepHighlight(
+            wakeTime: latestSession.end,
+            sleepSummary: sleepSummary,
+            recapDate: movementDayStart
+        )
+
+        return DailyRecap(date: movementDayStart, sleep: sleepSummary, movement: movement, insight: insight)
     }
 
     private func baselineSleepSessions(from sessions: [SleepSession], excluding latest: SleepSession) -> [SleepSession] {
-        let prior = sessions.filter { $0.end < latest.end }.sorted { $0.end < $1.end }
+        let prior = sessions
+            .filter { $0.end < latest.end && $0.asleepDuration >= mainSleepMinimum }
+            .sorted { $0.end < $1.end }
         if prior.isEmpty {
             return Array(sessions.sorted { $0.end < $1.end }.suffix(7))
         }
         return Array(prior.suffix(7))
+    }
+
+    private func selectPrimarySleepSession(from sessions: [SleepSession], now: Date) -> SleepSession? {
+        guard !sessions.isEmpty else { return nil }
+
+        let recentCutoff = now.addingTimeInterval(-recentWindow)
+        let recentCandidates = sessions.filter {
+            $0.end >= recentCutoff && $0.asleepDuration >= mainSleepMinimum
+        }
+
+        if let bestRecent = recentCandidates.max(by: { $0.asleepDuration < $1.asleepDuration }) {
+            return bestRecent
+        }
+
+        let mainCandidates = sessions.filter { $0.asleepDuration >= mainSleepMinimum }
+        if let bestMain = mainCandidates.max(by: { $0.end < $1.end }) {
+            return bestMain
+        }
+
+        return sessions.max(by: { $0.end < $1.end })
     }
 
     private func makeSleepBaseline(from sessions: [SleepSession]) -> SleepBaseline {

@@ -9,7 +9,9 @@
 import SwiftUI
 
 struct ContentView: View {
+    @EnvironmentObject private var appState: AppState
+
     var body: some View {
-        DailyRecapView()
+        DailyRecapView(targetDate: appState.recapDate)
     }
 }
