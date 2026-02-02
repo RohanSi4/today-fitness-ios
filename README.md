@@ -117,6 +117,10 @@ Make sure your Info.plist contains:
 - `NSHealthShareUsageDescription`
 - `NSHealthUpdateUsageDescription`
 
+## Debugging on Mac / Simulator
+
+HealthKit data is not available on macOS or in the iOS Simulator. Use **Sample Data** mode in the Daily Recap view (Debug builds) to preview the UI without HealthKit.
+
 Permissions can be managed in:
 **Settings → Privacy & Security → Health → Health Tracker**
 

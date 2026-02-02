@@ -65,14 +65,23 @@ struct DailyRecap {
 
 extension DailyRecap {
     static func mock() -> DailyRecap {
-        let now = Date()
+        mock(for: Date())
+    }
+
+    static func mock(for date: Date) -> DailyRecap {
+        let calendar = Calendar.current
+        let recapDate = calendar.startOfDay(for: date)
+        let wakeDate = calendar.date(byAdding: .day, value: 1, to: recapDate) ?? recapDate
+        let wakeTime = calendar.date(bySettingHour: 7, minute: 10, second: 0, of: wakeDate) ?? wakeDate
+        let bedtime = calendar.date(byAdding: .hour, value: -7, to: wakeTime) ?? wakeTime
+
         let sleep = SleepSummary(
             score: 82,
             duration: 6.5 * 3600,
             inBed: 7.3 * 3600,
             efficiency: 0.89,
-            bedtime: Calendar.current.date(byAdding: .hour, value: -8, to: now) ?? now,
-            wakeTime: now,
+            bedtime: bedtime,
+            wakeTime: wakeTime,
             avgDuration: 7.2 * 3600,
             avgInBed: 7.8 * 3600,
             avgEfficiency: 0.91,
@@ -87,7 +96,7 @@ extension DailyRecap {
         ]
 
         return DailyRecap(
-            date: Calendar.current.date(byAdding: .day, value: -1, to: now) ?? now,
+            date: recapDate,
             sleep: sleep,
             movement: movement,
             insight: "Sleep was down, but steps were above average."

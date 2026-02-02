@@ -4,6 +4,7 @@ struct DailyRecapView: View {
     let targetDate: Date?
 
     @StateObject private var viewModel: DailyRecapViewModel
+    @AppStorage("useMockData") private var useMockData = false
 
     init(targetDate: Date? = nil) {
         self.targetDate = targetDate
@@ -16,6 +17,7 @@ struct DailyRecapView: View {
                 .navigationTitle("Daily Recap")
         }
         .task {
+            await viewModel.updateUseMockData(useMockData)
             await viewModel.load()
         }
         .onChange(of: targetDate) { newValue in
@@ -23,6 +25,20 @@ struct DailyRecapView: View {
                 await viewModel.updateTargetDate(newValue)
             }
         }
+        .onChange(of: useMockData) { newValue in
+            Task {
+                await viewModel.updateUseMockData(newValue)
+            }
+        }
+#if DEBUG
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button(useMockData ? "Live Data" : "Sample Data") {
+                    useMockData.toggle()
+                }
+            }
+        }
+#endif
     }
 
     @ViewBuilder
@@ -57,17 +73,27 @@ struct DailyRecapView: View {
             .padding()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .loaded(let recap):
-            DailyRecapContentView(recap: recap)
+            DailyRecapContentView(recap: recap, isMockData: useMockData)
         }
     }
 }
 
 struct DailyRecapContentView: View {
     let recap: DailyRecap
+    let isMockData: Bool
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
+                if isMockData {
+                    Label("Sample data", systemImage: "sparkles")
+                        .font(.caption)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color(.tertiarySystemBackground))
+                        .clipShape(Capsule())
+                }
+
                 Text(formattedDate(recap.date))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -307,5 +333,5 @@ private struct MetricRow: View {
 }
 
 #Preview {
-    DailyRecapContentView(recap: .mock())
+    DailyRecapContentView(recap: .mock(), isMockData: true)
 }

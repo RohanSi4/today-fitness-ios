@@ -15,6 +15,7 @@ final class DailyRecapViewModel: ObservableObject {
     private let mainSleepMinimum: TimeInterval = 3 * 3600
     private let recentWindow: TimeInterval = 18 * 3600
     private var targetDate: Date?
+    private var useMockData = false
 
     init(targetDate: Date? = nil) {
         self.targetDate = targetDate
@@ -22,6 +23,12 @@ final class DailyRecapViewModel: ObservableObject {
 
     func updateTargetDate(_ date: Date?) async {
         targetDate = date
+        state = .idle
+        await load()
+    }
+
+    func updateUseMockData(_ value: Bool) async {
+        useMockData = value
         state = .idle
         await load()
     }
@@ -37,6 +44,12 @@ final class DailyRecapViewModel: ObservableObject {
         state = .loading
 
         do {
+            if useMockData {
+                let recapDate = targetDate ?? Calendar.current.date(byAdding: .day, value: -1, to: Date()) ?? Date()
+                state = .loaded(DailyRecap.mock(for: recapDate))
+                return
+            }
+
             let recap = try await buildRecap()
             state = .loaded(recap)
         } catch {
