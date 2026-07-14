@@ -1,12 +1,21 @@
 import Foundation
 import UserNotifications
 
-final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
+protocol RecapNotificationScheduling {
+    func requestAuthorization() async -> Bool
+    func scheduleSleepHighlightIfAuthorized(
+        wakeTime: Date,
+        sleepSummary: SleepSummary,
+        recapDate: Date
+    ) async
+}
+
+final class NotificationManager: NSObject, RecapNotificationScheduling, UNUserNotificationCenterDelegate {
     static let shared = NotificationManager()
 
     weak var appState: AppState?
 
-    private let recapNotificationId = "dailyRecap"
+    private let recapNotificationID = "dailyRecap"
     private let recapDateKey = "recapDate"
 
     func register() {
@@ -14,45 +23,50 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     }
 
     func requestAuthorization() async -> Bool {
-        let center = UNUserNotificationCenter.current()
-        return await withCheckedContinuation { continuation in
-            center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
-                continuation.resume(returning: granted)
-            }
+        do {
+            return try await UNUserNotificationCenter.current()
+                .requestAuthorization(options: [.alert, .sound])
+        } catch {
+            return false
         }
     }
 
-    func scheduleSleepHighlight(wakeTime: Date, sleepSummary: SleepSummary, recapDate: Date) async {
-        guard await requestAuthorization() else {
+    func scheduleSleepHighlightIfAuthorized(
+        wakeTime: Date,
+        sleepSummary: SleepSummary,
+        recapDate: Date
+    ) async {
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        guard settings.authorizationStatus == .authorized ||
+                settings.authorizationStatus == .provisional else {
             return
         }
 
-        guard let fireDate = Calendar.current.date(byAdding: .minute, value: 20, to: wakeTime) else {
-            return
-        }
-
-        if fireDate <= Date() {
+        guard let fireDate = Calendar.current.date(byAdding: .minute, value: 20, to: wakeTime),
+              fireDate > Date() else {
             return
         }
 
         let content = UNMutableNotificationContent()
-        content.title = "Daily health check"
+        content.title = "Your daily recap is ready"
         content.body = buildSleepHighlight(for: sleepSummary)
         content.sound = .default
-        content.userInfo = [recapDateKey: isoDateString(from: recapDate)]
+        content.userInfo = [recapDateKey: recapDate.timeIntervalSince1970]
 
-        let components = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fireDate)
+        let components = Calendar.current.dateComponents(
+            [.year, .month, .day, .hour, .minute],
+            from: fireDate
+        )
         let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
-        let request = UNNotificationRequest(identifier: recapNotificationId, content: content, trigger: trigger)
+        let request = UNNotificationRequest(
+            identifier: recapNotificationID,
+            content: content,
+            trigger: trigger
+        )
 
-        let center = UNUserNotificationCenter.current()
-        center.removePendingNotificationRequests(withIdentifiers: [recapNotificationId])
-
-        do {
-            try await center.add(request)
-        } catch {
-            // Best-effort scheduling; ignore errors for MVP.
-        }
+        center.removePendingNotificationRequests(withIdentifiers: [recapNotificationID])
+        try? await center.add(request)
     }
 
     func userNotificationCenter(
@@ -68,27 +82,25 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        let userInfo = response.notification.request.content.userInfo
-        if let dateString = userInfo[recapDateKey] as? String,
-           let recapDate = isoDate(from: dateString) {
-            Task { @MainActor in
-                appState?.openRecap(for: recapDate)
-            }
+        defer { completionHandler() }
+
+        let value = response.notification.request.content.userInfo[recapDateKey]
+        let timestamp = (value as? NSNumber)?.doubleValue ?? value as? Double
+        guard let timestamp else { return }
+
+        Task { @MainActor [weak self] in
+            self?.appState?.openRecap(for: Date(timeIntervalSince1970: timestamp))
         }
-        completionHandler()
     }
 
     private func buildSleepHighlight(for summary: SleepSummary) -> String {
-        let score = summary.score
-
         guard summary.avgDuration > 0 else {
-            let durationText = formattedDuration(summary.duration)
-            return "Sleep Score \(score). You slept \(durationText)."
+            return "Sleep score: \(summary.score). You slept \(formattedDuration(summary.duration))."
         }
 
         let deltaMinutes = Int(abs(summary.durationDelta) / 60)
         let direction = summary.durationDelta >= 0 ? "more" : "less"
-        return "Sleep Score \(score). You slept \(deltaMinutes)m \(direction) than your 7 day average."
+        return "Sleep score: \(summary.score). That’s \(deltaMinutes) minutes \(direction) than your baseline."
     }
 
     private func formattedDuration(_ seconds: TimeInterval) -> String {
@@ -96,17 +108,5 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         formatter.allowedUnits = [.hour, .minute]
         formatter.unitsStyle = .abbreviated
         return formatter.string(from: seconds) ?? "--"
-    }
-
-    private func isoDateString(from date: Date) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate]
-        return formatter.string(from: date)
-    }
-
-    private func isoDate(from string: String) -> Date? {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate]
-        return formatter.date(from: string)
     }
 }

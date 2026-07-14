@@ -3,335 +3,216 @@ import SwiftUI
 struct DailyRecapView: View {
     let targetDate: Date?
 
+    @AppStorage("useMockData") private var useSampleData = RecapLaunchEnvironment.prefersSampleData
     @StateObject private var viewModel: DailyRecapViewModel
-    @AppStorage("useMockData") private var useMockData = false
+    @State private var reminderResult: ReminderResult?
+
+    private var loadRequest: LoadRequest {
+        LoadRequest(targetDate: targetDate, useSampleData: useSampleData)
+    }
 
     init(targetDate: Date? = nil) {
         self.targetDate = targetDate
-        _viewModel = StateObject(wrappedValue: DailyRecapViewModel(targetDate: targetDate))
+        _viewModel = StateObject(wrappedValue: DailyRecapViewModel())
     }
 
     var body: some View {
         NavigationStack {
-            content
-                .navigationTitle("Daily Recap")
-        }
-        .task {
-            await viewModel.updateUseMockData(useMockData)
-            await viewModel.load()
-        }
-        .onChange(of: targetDate) { newValue in
-            Task {
-                await viewModel.updateTargetDate(newValue)
+            ZStack {
+                Color(.systemGroupedBackground)
+                    .ignoresSafeArea()
+                stateContent
             }
+            .navigationTitle("Health Recap")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { recapToolbar }
         }
-        .onChange(of: useMockData) { newValue in
-            Task {
-                await viewModel.updateUseMockData(newValue)
-            }
+        .tint(RecapPalette.accent)
+        .task(id: loadRequest) {
+            await viewModel.load(
+                targetDate: loadRequest.targetDate,
+                useSampleData: loadRequest.useSampleData
+            )
         }
-#if DEBUG
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button(useMockData ? "Live Data" : "Sample Data") {
-                    useMockData.toggle()
-                }
-            }
+        .alert(item: $reminderResult) { result in
+            Alert(
+                title: Text(result.title),
+                message: Text(result.message),
+                dismissButton: .default(Text("Done"))
+            )
         }
-#endif
     }
 
     @ViewBuilder
-    private var content: some View {
+    private var stateContent: some View {
         switch viewModel.state {
         case .idle, .loading:
-            VStack(spacing: 16) {
-                ProgressView()
-                Text("Loading your recap...")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            RecapLoadingView()
         case .error(let message):
-            VStack(spacing: 12) {
-                Text("Unable to load")
-                    .font(.headline)
-                Text(message)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                Text("Check Health permissions in Settings → Privacy & Security → Health.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                Button("Try Again") {
-                    Task {
-                        await viewModel.load()
-                    }
-                }
+            RecapErrorView(
+                message: message,
+                retry: retry,
+                showSampleData: showSampleData
+            )
+        case .loaded(let recap, let source):
+            DailyRecapContentView(recap: recap, source: source)
+                .refreshable { await retryAsync() }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var recapToolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            Menu {
+                Button(
+                    useSampleData ? "Use Health data" : "Use sample data",
+                    systemImage: useSampleData ? "heart.text.square" : "sparkles",
+                    action: toggleDataSource
+                )
+                Button(
+                    "Enable morning reminders",
+                    systemImage: "bell.badge",
+                    action: enableReminders
+                )
+                .disabled(!viewModel.isShowingHealthData)
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .accessibilityLabel("Recap options")
             }
-            .padding()
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        case .loaded(let recap):
-            DailyRecapContentView(recap: recap, isMockData: useMockData)
+        }
+    }
+
+    private func toggleDataSource() {
+        useSampleData.toggle()
+    }
+
+    private func showSampleData() {
+        useSampleData = true
+    }
+
+    private func retry() {
+        Task { await retryAsync() }
+    }
+
+    private func retryAsync() async {
+        await viewModel.load(targetDate: targetDate, useSampleData: useSampleData)
+    }
+
+    private func enableReminders() {
+        Task {
+            let granted = await viewModel.enableMorningReminders()
+            reminderResult = granted ? .enabled : .denied
         }
     }
 }
 
 struct DailyRecapContentView: View {
     let recap: DailyRecap
-    let isMockData: Bool
+    let source: RecapDataSource
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                if isMockData {
-                    Label("Sample data", systemImage: "sparkles")
-                        .font(.caption)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color(.tertiarySystemBackground))
-                        .clipShape(Capsule())
-                }
-
-                Text(formattedDate(recap.date))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-
-                sleepSection(recap.sleep)
-                movementSection(recap.movement)
-                insightSection(recap.insight)
+            VStack(alignment: .leading, spacing: 18) {
+                RecapSourceBanner(source: source)
+                RecapHeroCard(recap: recap)
+                RecapInsightCard(insight: recap.insight)
+                SleepDetailsCard(sleep: recap.sleep)
+                MovementSection(movement: recap.movement)
             }
-            .padding()
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 32)
         }
-    }
-
-    private func sleepSection(_ sleep: SleepSummary) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Sleep")
-                .font(.title2)
-                .bold()
-
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Sleep Score")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Text("\(sleep.score)")
-                        .font(.system(size: 40, weight: .bold))
-                }
-                Spacer()
-            }
-
-            MetricRow(
-                title: "Time asleep",
-                value: formattedDuration(sleep.duration),
-                detail: formattedDurationDetail(current: sleep.duration, average: sleep.avgDuration)
-            )
-
-            MetricRow(
-                title: "Time in bed",
-                value: formattedDuration(sleep.inBed),
-                detail: formattedDurationDetail(current: sleep.inBed, average: sleep.avgInBed)
-            )
-
-            MetricRow(
-                title: "Efficiency",
-                value: formattedPercent(sleep.efficiency),
-                detail: formattedPercentDetail(current: sleep.efficiency, average: sleep.avgEfficiency)
-            )
-
-            MetricRow(
-                title: "Bedtime",
-                value: formattedTime(sleep.bedtime),
-                detail: formattedTimeDetail(actual: sleep.bedtime, avgMinutes: sleep.avgBedtimeMinutes)
-            )
-
-            MetricRow(
-                title: "Wake time",
-                value: formattedTime(sleep.wakeTime),
-                detail: formattedTimeDetail(actual: sleep.wakeTime, avgMinutes: sleep.avgWakeTimeMinutes)
-            )
-        }
-        .padding()
-        .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-
-    private func movementSection(_ movement: [MovementMetric]) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Movement")
-                .font(.title2)
-                .bold()
-
-            ForEach(movement) { metric in
-                MetricRow(
-                    title: metric.title,
-                    value: formattedMovementValue(metric.value, unit: metric.unit),
-                    detail: formattedMovementDetail(current: metric.value, average: metric.average, unit: metric.unit)
-                )
-            }
-        }
-        .padding()
-        .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-
-    private func insightSection(_ insight: String) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Insight")
-                .font(.title3)
-                .bold()
-            Text(insight)
-                .font(.body)
-        }
-        .padding()
-        .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-
-    private func formattedDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .full
-        formatter.timeStyle = .none
-        return formatter.string(from: date)
-    }
-
-    private func formattedTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        formatter.dateStyle = .none
-        return formatter.string(from: date)
-    }
-
-    private func formattedDuration(_ seconds: TimeInterval) -> String {
-        let formatter = DateComponentsFormatter()
-        formatter.allowedUnits = [.hour, .minute]
-        formatter.unitsStyle = .abbreviated
-        return formatter.string(from: seconds) ?? "--"
-    }
-
-    private func formattedDurationDetail(current: TimeInterval, average: TimeInterval) -> String {
-        guard average > 0 else { return "Avg --" }
-        let delta = current - average
-        return "Avg \(formattedDuration(average)) (\(formattedDurationDelta(delta)))"
-    }
-
-    private func formattedDurationDelta(_ delta: TimeInterval) -> String {
-        let sign = delta >= 0 ? "+" : "-"
-        let formatted = formattedDuration(abs(delta))
-        return "\(sign)\(formatted) vs avg"
-    }
-
-    private func formattedPercent(_ value: Double) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .percent
-        formatter.maximumFractionDigits = 0
-        return formatter.string(from: NSNumber(value: value)) ?? "--"
-    }
-
-    private func formattedPercentDetail(current: Double, average: Double) -> String {
-        guard average > 0 else { return "Avg --" }
-        let delta = current - average
-        let sign = delta >= 0 ? "+" : "-"
-        let deltaText = formattedPercent(abs(delta))
-        return "Avg \(formattedPercent(average)) (\(sign)\(deltaText) vs avg)"
-    }
-
-    private func formattedTimeDetail(actual: Date, avgMinutes: Double?) -> String {
-        guard let avgMinutes else { return "Avg --" }
-        let avgDate = dateForMinutes(avgMinutes)
-        let avgString = formattedTime(avgDate)
-        let actualMinutes = minutesSinceMidnight(actual)
-        let diff = actualMinutes - avgMinutes
-
-        if abs(diff) < 1 {
-            return "Avg \(avgString) (on time)"
-        }
-
-        let direction = diff > 0 ? "later" : "earlier"
-        let diffMinutes = Int(abs(diff).rounded())
-        return "Avg \(avgString) (\(diffMinutes)m \(direction))"
-    }
-
-    private func minutesSinceMidnight(_ date: Date) -> Double {
-        let calendar = Calendar.current
-        let components = calendar.dateComponents([.hour, .minute], from: date)
-        let hour = components.hour ?? 0
-        let minute = components.minute ?? 0
-        return Double(hour * 60 + minute)
-    }
-
-    private func dateForMinutes(_ minutes: Double) -> Date {
-        let calendar = Calendar.current
-        let totalMinutes = Int(minutes.rounded())
-        let hour = max(0, min(23, totalMinutes / 60))
-        let minute = max(0, min(59, totalMinutes % 60))
-        return calendar.date(bySettingHour: hour, minute: minute, second: 0, of: Date()) ?? Date()
-    }
-
-    private func formattedMovementValue(_ value: Double, unit: MovementUnit) -> String {
-        switch unit {
-        case .count:
-            return formattedNumber(value)
-        case .meters:
-            return formattedDistance(value)
-        case .kilocalories:
-            return "\(formattedNumber(value)) kcal"
-        }
-    }
-
-    private func formattedMovementDetail(current: Double, average: Double, unit: MovementUnit) -> String {
-        guard average > 0 else { return "Avg --" }
-        let delta = current - average
-        let sign = delta >= 0 ? "+" : "-"
-        let deltaText = formattedMovementValue(abs(delta), unit: unit)
-        return "Avg \(formattedMovementValue(average, unit: unit)) (\(sign)\(deltaText) vs avg)"
-    }
-
-    private func formattedNumber(_ value: Double) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.maximumFractionDigits = 0
-        return formatter.string(from: NSNumber(value: value)) ?? "--"
-    }
-
-    private func formattedDistance(_ meters: Double) -> String {
-        let useMetric = Locale.current.usesMetricSystem
-        let unit = useMetric ? UnitLength.kilometers : UnitLength.miles
-        let measurement = Measurement(value: meters, unit: UnitLength.meters).converted(to: unit)
-
-        let formatter = MeasurementFormatter()
-        formatter.unitOptions = .providedUnit
-        formatter.unitStyle = .short
-        formatter.numberFormatter.maximumFractionDigits = 1
-
-        return formatter.string(from: measurement)
+        .scrollIndicators(.hidden)
+        .accessibilityIdentifier("daily-recap-scroll")
     }
 }
 
-private struct MetricRow: View {
-    let title: String
-    let value: String
-    let detail: String
+private struct RecapLoadingView: View {
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 18) {
+                RecapHeroCard(recap: .mock())
+                RecapInsightCard(insight: DailyRecap.mock().insight)
+                SleepDetailsCard(sleep: DailyRecap.mock().sleep)
+            }
+            .padding(16)
+            .redacted(reason: .placeholder)
+            .allowsHitTesting(false)
+        }
+        .accessibilityLabel("Loading health recap")
+    }
+}
+
+private struct RecapErrorView: View {
+    let message: String
+    let retry: () -> Void
+    let showSampleData: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(title)
-                    .font(.subheadline)
-                Spacer()
-                Text(value)
-                    .font(.subheadline)
-                    .bold()
-            }
-            Text(detail)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+        ContentUnavailableView {
+            Label("Recap unavailable", systemImage: "heart.slash")
+        } description: {
+            Text(message)
+        } actions: {
+            Button("Try again", action: retry)
+                .buttonStyle(.borderedProminent)
+            Button("Preview sample data", action: showSampleData)
+                .buttonStyle(.bordered)
+        }
+        .padding()
+    }
+}
+
+private struct LoadRequest: Equatable {
+    let targetDate: Date?
+    let useSampleData: Bool
+}
+
+private enum RecapLaunchEnvironment {
+    static var prefersSampleData: Bool {
+#if targetEnvironment(simulator)
+        true
+#else
+        ProcessInfo.processInfo.arguments.contains("--sample-data")
+#endif
+    }
+}
+
+private enum ReminderResult: Identifiable {
+    case enabled
+    case denied
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .enabled: "Reminders enabled"
+        case .denied: "Notifications are off"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .enabled:
+            "When the app sees a newly finished sleep session, it can prepare a recap reminder."
+        case .denied:
+            "You can allow notifications later in Settings."
         }
     }
 }
 
-#Preview {
-    DailyRecapContentView(recap: .mock(), isMockData: true)
+#Preview("Sample recap") {
+    DailyRecapContentView(
+        recap: .mock(),
+        source: .sample(reason: "Previewing a deterministic demo day")
+    )
+}
+
+#Preview("Accessibility text") {
+    DailyRecapContentView(
+        recap: .mock(),
+        source: .sample(reason: "HealthKit is unavailable in Simulator")
+    )
+    .environment(\.dynamicTypeSize, .accessibility2)
 }

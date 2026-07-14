@@ -10,27 +10,44 @@ enum HealthKitError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .healthDataNotAvailable:
-            return "Health data is not available on this device."
+            "Health data is not available here. Run on an iPhone to use your data."
         case .authorizationDenied:
-            return "HealthKit authorization was not granted."
+            "Health access was not granted. You can change access in Settings."
         case .unsupportedType:
-            return "A required HealthKit data type is unavailable."
+            "A required Health data type is unavailable."
         case .noSleepData:
-            return "No recent sleep data was found."
+            "No recent sleep session was found."
         }
     }
 }
 
-final class HealthKitManager {
+protocol HealthDataProviding {
+    var isHealthDataAvailable: Bool { get }
+    func requestAuthorization() async throws
+    func fetchSleepSessions(start: Date, end: Date) async throws -> [SleepSession]
+    func fetchDailyCumulativeStatistics(
+        for kind: MovementKind,
+        start: Date,
+        end: Date
+    ) async throws -> [Date: Double]
+}
+
+final class HealthKitManager: HealthDataProviding {
     static let shared = HealthKitManager()
 
-    private let store = HKHealthStore()
-    private let sessionGap: TimeInterval = 90 * 60
+    var isHealthDataAvailable: Bool {
+        HKHealthStore.isHealthDataAvailable()
+    }
 
-    private init() {}
+    private let store: HKHealthStore
+    private let sessionAssembler = SleepSessionAssembler()
+
+    private init(store: HKHealthStore = HKHealthStore()) {
+        self.store = store
+    }
 
     func requestAuthorization() async throws {
-        guard HKHealthStore.isHealthDataAvailable() else {
+        guard isHealthDataAvailable else {
             throw HealthKitError.healthDataNotAvailable
         }
 
@@ -61,10 +78,10 @@ final class HealthKitManager {
             throw HealthKitError.unsupportedType
         }
 
-        let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: [])
         let sortDescriptors = [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)]
 
-        let samples = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[HKCategorySample], Error>) in
+        let samples: [HKCategorySample] = try await withCheckedThrowingContinuation { continuation in
             let query = HKSampleQuery(
                 sampleType: sleepType,
                 predicate: predicate,
@@ -75,23 +92,22 @@ final class HealthKitManager {
                     continuation.resume(throwing: error)
                     return
                 }
-
-                let categorySamples = (results as? [HKCategorySample]) ?? []
-                continuation.resume(returning: categorySamples)
+                continuation.resume(returning: (results as? [HKCategorySample]) ?? [])
             }
-
             store.execute(query)
         }
 
-        return buildSleepSessions(from: samples)
+        let intervals = samples.compactMap(SleepInterval.init(sample:))
+        return sessionAssembler.sessions(from: intervals)
     }
 
     func fetchDailyCumulativeStatistics(
-        for typeIdentifier: HKQuantityTypeIdentifier,
+        for kind: MovementKind,
         start: Date,
         end: Date
     ) async throws -> [Date: Double] {
-        guard let quantityType = HKObjectType.quantityType(forIdentifier: typeIdentifier) else {
+        let identifier = quantityIdentifier(for: kind)
+        guard let quantityType = HKObjectType.quantityType(forIdentifier: identifier) else {
             throw HealthKitError.unsupportedType
         }
 
@@ -99,9 +115,9 @@ final class HealthKitManager {
         let anchorDate = calendar.startOfDay(for: start)
         let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
         let interval = DateComponents(day: 1)
-        let unit = unit(for: typeIdentifier)
+        let unit = unit(for: kind)
 
-        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[Date: Double], Error>) in
+        return try await withCheckedThrowingContinuation { continuation in
             let query = HKStatisticsCollectionQuery(
                 quantityType: quantityType,
                 quantitySamplePredicate: predicate,
@@ -117,106 +133,137 @@ final class HealthKitManager {
                 }
 
                 var data: [Date: Double] = [:]
-                if let results {
-                    results.enumerateStatistics(from: start, to: end) { statistics, _ in
-                        let sum = statistics.sumQuantity()?.doubleValue(for: unit) ?? 0
-                        let dayStart = calendar.startOfDay(for: statistics.startDate)
-                        data[dayStart] = sum
-                    }
+                results?.enumerateStatistics(from: start, to: end) { statistics, _ in
+                    let dayStart = calendar.startOfDay(for: statistics.startDate)
+                    data[dayStart] = statistics.sumQuantity()?.doubleValue(for: unit) ?? 0
                 }
                 continuation.resume(returning: data)
             }
-
             store.execute(query)
         }
     }
 
-    private func unit(for identifier: HKQuantityTypeIdentifier) -> HKUnit {
-        switch identifier {
-        case .stepCount:
-            return HKUnit.count()
-        case .distanceWalkingRunning:
-            return HKUnit.meter()
-        case .activeEnergyBurned:
-            return HKUnit.kilocalorie()
-        default:
-            return HKUnit.count()
+    private func quantityIdentifier(for kind: MovementKind) -> HKQuantityTypeIdentifier {
+        switch kind {
+        case .steps: .stepCount
+        case .distance: .distanceWalkingRunning
+        case .activeEnergy: .activeEnergyBurned
         }
     }
 
-    private func buildSleepSessions(from samples: [HKCategorySample]) -> [SleepSession] {
-        let sleepSamples = samples.compactMap { sample -> SleepSample? in
-            guard let value = HKCategoryValueSleepAnalysis(rawValue: sample.value) else { return nil }
-
-            switch value {
-            case .inBed:
-                return SleepSample(start: sample.startDate, end: sample.endDate, isAsleep: false)
-            case .asleep, .asleepUnspecified, .asleepCore, .asleepDeep, .asleepREM:
-                return SleepSample(start: sample.startDate, end: sample.endDate, isAsleep: true)
-            default:
-                return nil
-            }
+    private func unit(for kind: MovementKind) -> HKUnit {
+        switch kind {
+        case .steps: .count()
+        case .distance: .meter()
+        case .activeEnergy: .kilocalorie()
         }
-
-        let sorted = sleepSamples.sorted { $0.start < $1.start }
-        var sessions: [SleepSession] = []
-        var builder: SleepSessionBuilder?
-
-        for sample in sorted {
-            if var current = builder {
-                let gap = sample.start.timeIntervalSince(current.end)
-                if gap > sessionGap {
-                    sessions.append(current.build())
-                    current = SleepSessionBuilder(
-                        start: sample.start,
-                        end: sample.end,
-                        asleepDuration: sample.isAsleep ? sample.duration : 0
-                    )
-                } else {
-                    current.end = max(current.end, sample.end)
-                    if sample.isAsleep {
-                        current.asleepDuration += sample.duration
-                    }
-                }
-                builder = current
-            } else {
-                builder = SleepSessionBuilder(
-                    start: sample.start,
-                    end: sample.end,
-                    asleepDuration: sample.isAsleep ? sample.duration : 0
-                )
-            }
-        }
-
-        if let builder {
-            sessions.append(builder.build())
-        }
-
-        return sessions
     }
 }
 
-private struct SleepSample {
+struct SleepInterval: Equatable {
+    enum Kind {
+        case inBed
+        case asleep
+    }
+
     let start: Date
     let end: Date
-    let isAsleep: Bool
+    let kind: Kind
 
-    var duration: TimeInterval {
-        max(0, end.timeIntervalSince(start))
+    var duration: TimeInterval { max(0, end.timeIntervalSince(start)) }
+}
+
+private extension SleepInterval {
+    init?(sample: HKCategorySample) {
+        guard sample.endDate > sample.startDate,
+              let value = HKCategoryValueSleepAnalysis(rawValue: sample.value) else {
+            return nil
+        }
+
+        let kind: Kind
+        switch value {
+        case .inBed:
+            kind = .inBed
+        case .asleep, .asleepUnspecified, .asleepCore, .asleepDeep, .asleepREM:
+            kind = .asleep
+        default:
+            return nil
+        }
+
+        self.init(start: sample.startDate, end: sample.endDate, kind: kind)
     }
 }
 
-private struct SleepSessionBuilder {
-    var start: Date
-    var end: Date
-    var asleepDuration: TimeInterval
+struct SleepSessionAssembler {
+    let sessionGap: TimeInterval
 
-    func build() -> SleepSession {
-        SleepSession(
+    init(sessionGap: TimeInterval = 90 * 60) {
+        self.sessionGap = sessionGap
+    }
+
+    func sessions(from intervals: [SleepInterval]) -> [SleepSession] {
+        let sorted = intervals
+            .filter { $0.end > $0.start }
+            .sorted { lhs, rhs in
+                lhs.start == rhs.start ? lhs.end < rhs.end : lhs.start < rhs.start
+            }
+
+        var groups: [[SleepInterval]] = []
+        for interval in sorted {
+            guard var group = groups.popLast() else {
+                groups.append([interval])
+                continue
+            }
+
+            let groupEnd = group.map(\.end).max() ?? interval.start
+            if interval.start.timeIntervalSince(groupEnd) > sessionGap {
+                groups.append(group)
+                groups.append([interval])
+            } else {
+                group.append(interval)
+                groups.append(group)
+            }
+        }
+
+        return groups.compactMap(makeSession)
+    }
+
+    private func makeSession(from intervals: [SleepInterval]) -> SleepSession? {
+        guard let start = intervals.map(\.start).min(),
+              let end = intervals.map(\.end).max() else {
+            return nil
+        }
+
+        let asleep = mergedDuration(of: intervals.filter { $0.kind == .asleep })
+        let recordedInBed = mergedDuration(of: intervals.filter { $0.kind == .inBed })
+        let inBed = max(asleep, recordedInBed > 0 ? recordedInBed : end.timeIntervalSince(start))
+
+        return SleepSession(
             start: start,
             end: end,
-            asleepDuration: asleepDuration,
-            inBedDuration: max(0, end.timeIntervalSince(start))
+            asleepDuration: asleep,
+            inBedDuration: inBed
         )
+    }
+
+    private func mergedDuration(of intervals: [SleepInterval]) -> TimeInterval {
+        let sorted = intervals.sorted { $0.start < $1.start }
+        guard var current = sorted.first else { return 0 }
+        var total: TimeInterval = 0
+
+        for interval in sorted.dropFirst() {
+            if interval.start <= current.end {
+                current = SleepInterval(
+                    start: current.start,
+                    end: max(current.end, interval.end),
+                    kind: current.kind
+                )
+            } else {
+                total += current.duration
+                current = interval
+            }
+        }
+
+        return total + current.duration
     }
 }

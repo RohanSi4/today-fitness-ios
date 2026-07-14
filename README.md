@@ -1,157 +1,52 @@
-# Health Tracker
+# Health Recap
 
-A modern iOS app built with SwiftUI + HealthKit. Current focus: a **Daily Health Recap** with a sleep-first morning highlight and simple 7-day comparisons.
+Health Recap turns Apple Health sleep and movement samples into a focused, privacy-first daily briefing. The app is built with SwiftUI, HealthKit, async/await, and deterministic sample data so the complete experience is reviewable without a physical device.
 
-## Current MVP: Daily Recap Dashboard
+## What it shows
 
-**Morning flow**
-- Detect the **sleep session that just ended** (most recent session end time).
-- Best-effort notification at **wakeTime + 20 minutes** with a short sleep highlight.
-- Tap opens `DailyRecapView(date: yesterday)`.
+- A weighted sleep score based on duration, efficiency, and wake-time consistency
+- Sleep duration, time in bed, bedtime, wake time, and seven-day comparisons
+- Steps, walking distance, active energy, and seven-day baselines
+- A plain-language takeaway selected from the strongest sleep and movement signals
+- An opt-in recap notification when the app observes a newly completed sleep session
 
-**“Yesterday” definition**
-- **Sleep:** the sleep session that just ended (most recent session end).
-- **Movement stats:** the **calendar day before today**, midnight → midnight (local time).
+## Architecture
 
-## Daily Recap: MVP Sections
-
-**Sleep (required)**
-- Sleep score
-- Time asleep
-- Time in bed
-- Efficiency
-- Bedtime + wake time
-- Comparison vs 7‑day average
-
-**Movement (required)**
-- Steps
-- Walking distance
-- Active energy
-- Each shows yesterday, 7‑day average, and delta text
-
-**Insight (required)**
-- One sentence summarizing the most meaningful signal across metrics.
-
-**Optional later**
-- Activity rings
-- Resting HR / HRV
-- Workouts / mindful minutes
-
-## Sleep Score (Option A — asymmetric duration)
-
-Goal: **80+ is attainable**, **90+ is hard**.
-
-**Inputs**
-- Duration (asleep)
-- Efficiency (asleep / in bed)
-- Consistency (wake time vs 7‑day average wake time)
-
-**Duration subscore**
-- 7.5–10.5h → 1.0 (no penalty)
-- 6.0–7.5h → 0.7 → 1.0 (linear)
-- 5.0–6.0h → 0.4 → 0.7 (linear)
-- <5.0h → 0.3
-- 10.5–12.0h → 1.0 → 0.6 (linear)
-- >12.0h → 0.5
-
-**Efficiency subscore**
-- ≥95% → 1.0
-- 85–95% → 0.75 → 1.0 (linear)
-- 70–85% → 0.40 → 0.75 (linear)
-- <70% → 0.30
-
-**Consistency subscore (wake time)**
-- ≤20 min → 1.0
-- 20–60 min → 1.0 → 0.6 (linear)
-- 60–120 min → 0.6 → 0.3 (linear)
-- >120 min → 0.2
-
-**Score**
-```
-score = 100 * (0.55*duration + 0.25*efficiency + 0.20*consistency)
-```
-**90+ gate:** if any subscore < 0.85, cap at 89.
-
-## Data Sources (HealthKit)
-
-- Sleep: `HKCategoryTypeIdentifier.sleepAnalysis`
-- Steps: `HKQuantityTypeIdentifier.stepCount`
-- Walking distance: `HKQuantityTypeIdentifier.distanceWalkingRunning`
-- Active energy: `HKQuantityTypeIdentifier.activeEnergyBurned`
-
-## MVP Checklist
-
-**Must have**
-- [x] Sleep ingestion + score (HealthKitManager + SleepScoreCalculator)
-- [x] Steps, distance, active energy ingestion
-- [x] Daily recap UI with 7‑day comparisons
-- [x] Morning notification with sleep highlight + deep link (scheduled on app open; background refresh TBD)
-
-**Nice to have**
-- [ ] Activity rings
-- [ ] Insight selection refinements
-- [ ] Weekly trends view
-
-## Requirements
-
-- iOS 17.0+
-- Xcode 15.0+
-- Swift 5.0+
-- HealthKit capability enabled
-- Apple Developer Account (for device testing)
-
-## Getting Started
-
-1. Open the project in Xcode:
-   ```bash
-   open "Health Tracker.xcodeproj"
-   ```
-
-2. Set your Development Team in **Signing & Capabilities**.
-
-3. Build and run (⌘R).
-
-## HealthKit Setup
-
-Make sure your Info.plist contains:
-- `NSHealthShareUsageDescription`
-- `NSHealthUpdateUsageDescription`
-
-## Debugging on Mac / Simulator
-
-HealthKit data is not available on macOS or in the iOS Simulator. Use **Sample Data** mode in the Daily Recap view (Debug builds) to preview the UI without HealthKit.
-
-Permissions can be managed in:
-**Settings → Privacy & Security → Health → Health Tracker**
-
-## Project Structure
-
-```
-Health Tracker/
-├── Health Tracker/              # App source
-│   ├── Health_TrackerApp.swift  # App entry point
-│   ├── ContentView.swift        # Root view
-│   ├── DailyRecapView.swift     # Daily recap UI
-│   ├── DailyRecapViewModel.swift
-│   ├── DailyRecapModels.swift
-│   ├── HealthKitManager.swift   # HealthKit access
-│   ├── NotificationManager.swift
-│   ├── AppState.swift
-│   └── SleepScoreCalculator.swift
-├── Health TrackerTests/
-└── Health TrackerUITests/
+```text
+SwiftUI screen
+    └── DailyRecapViewModel (loading and presentation state)
+        └── DailyRecapBuilder (recap orchestration and domain rules)
+            ├── HealthDataProviding
+            │   └── HealthKitManager
+            └── SleepScoreCalculator / CircularClock / DailyRecapInsight
 ```
 
-## Version History
+Dependencies are protocol-backed, so the presentation flow can use HealthKit on iPhone and deterministic fixtures in Simulator and tests. Domain models do not depend on SwiftUI or HealthKit types.
 
-- **1.0** (June 2025) - Initial release
-- **1.1** (In progress) - Daily Recap MVP
+## Data correctness details
 
-## Author
+- Overlapping sleep-stage intervals are merged before duration is calculated, avoiding double-counting samples from multiple stages or sources.
+- Bedtime and wake-time baselines use a circular mean, so 11:50 PM and 12:10 AM average to midnight instead of noon.
+- Movement comparisons use the seven calendar days *before* the recap day; the current value is not included in its own baseline.
+- HealthKit authorization is requested only for read types. Notification permission is a separate, explicit action.
 
-**Rohan Singh**
-- Created: June 17, 2025
+## Running it
 
----
+Requirements: Xcode 15+, iOS 17+, and an Apple Developer account for HealthKit device testing.
 
-Made with SwiftUI and HealthKit
+1. Open `Health Tracker.xcodeproj`.
+2. Select an iPhone Simulator to explore the automatic sample-data experience.
+3. Select a signed physical iPhone to grant Health access and review personal data.
+
+The overflow menu can switch between sample and Health data. Simulator always falls back to sample data because HealthKit is unavailable there. UI tests launch with `-useMockData true` for a deterministic state.
+
+## Tests
+
+The test suite covers sleep-score boundaries, overlap-safe session assembly, midnight-aware time math, seven-day baseline selection, deterministic fixtures, Simulator fallback, and the sample recap’s core UI sections.
+
+## Privacy and limitations
+
+- Health data stays on-device and is never uploaded.
+- The app requests read-only access to sleep, steps, walking/running distance, and active energy.
+- HealthKit behavior must be validated on a physical iPhone; Simulator validates the full UI and sample-data path only.
+- Notification scheduling is currently best-effort while the app is active. Background HealthKit delivery is not implemented, so this is not yet a guaranteed morning alarm.

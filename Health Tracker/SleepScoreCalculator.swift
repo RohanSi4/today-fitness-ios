@@ -76,7 +76,10 @@ struct SleepScoreCalculator {
             return 1.0
         }
 
-        let diff = abs(wakeTimeMinutes - avgWakeTimeMinutes)
+        let diff = abs(CircularClock.signedDifference(
+            from: avgWakeTimeMinutes,
+            to: wakeTimeMinutes
+        ))
         if diff <= 20 {
             return 1.0
         }
