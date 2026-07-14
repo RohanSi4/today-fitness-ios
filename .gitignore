@@ -3,3 +3,6 @@ DerivedData/
 portfolio-screenshots/
 *.xcuserstate
 xcuserdata/
+web/.next/
+web/node_modules/
+web/out/

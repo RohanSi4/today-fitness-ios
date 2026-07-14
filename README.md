@@ -40,6 +40,20 @@ Requirements: Xcode 15+, iOS 17+, and an Apple Developer account for HealthKit d
 
 The overflow menu can switch between sample and Health data. Simulator always falls back to sample data because HealthKit is unavailable there. UI tests launch with `-useMockData true` for a deterministic state.
 
+## Browser demo
+
+**Live demo:** [health-recap.vercel.app](https://health-recap.vercel.app)
+
+The `web/` directory contains a responsive, interactive Next.js version of the sample-data experience. It is designed for product review and portfolio hosting. It never requests or implies access to real Apple Health data.
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+For Vercel, import this repository and set the **Root Directory** to `web`. No environment variables or external services are required.
+
 ## Tests
 
 The test suite covers sleep-score boundaries, overlap-safe session assembly, midnight-aware time math, seven-day baseline selection, deterministic fixtures, Simulator fallback, and the sample recap’s core UI sections.
