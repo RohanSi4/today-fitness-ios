@@ -2,6 +2,15 @@
 
 Health Recap turns Apple Health sleep and movement samples into a focused, privacy-first daily briefing. The app is built with SwiftUI, HealthKit, async/await, and deterministic sample data so the complete experience is reviewable without a physical device.
 
+[Try the browser demo](https://health-recap.vercel.app) ·
+[Read the case study](https://rohansingh04.com/projects/health-tracker-ios)
+
+![Health Recap daily briefing](portfolio-screenshots/health-recap-hero.png)
+
+I built the iPhone app, health-data layer, scoring logic, tests, and browser demo.
+The main goal was simple: make the useful parts of Apple Health easier to read
+without sending private health data anywhere else.
+
 ## What it shows
 
 - A weighted sleep score based on duration, efficiency, and wake-time consistency
@@ -30,7 +39,7 @@ Dependencies are protocol-backed, so the presentation flow can use HealthKit on 
 - Movement comparisons use the seven calendar days *before* the recap day; the current value is not included in its own baseline.
 - HealthKit authorization is requested only for read types. Notification permission is a separate, explicit action.
 
-## Running it
+## Run the iPhone app
 
 Requirements: Xcode 15+, iOS 17+, and an Apple Developer account for HealthKit device testing.
 
@@ -41,8 +50,6 @@ Requirements: Xcode 15+, iOS 17+, and an Apple Developer account for HealthKit d
 The overflow menu can switch between sample and Health data. Simulator always falls back to sample data because HealthKit is unavailable there. UI tests launch with `-useMockData true` for a deterministic state.
 
 ## Browser demo
-
-**Live demo:** [health-recap.vercel.app](https://health-recap.vercel.app)
 
 The `web/` directory contains a responsive, interactive Next.js version of the sample-data experience. It is designed for product review and portfolio hosting. It never requests or implies access to real Apple Health data.
 
