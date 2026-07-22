@@ -8,7 +8,7 @@ export default function Home() {
           <span className="brand-mark" aria-hidden="true">H</span>
           <span>Health Recap</span>
         </a>
-        <a className="text-link" href="https://github.com/RohanSi4/Health-Tracker-IOS-App">
+        <a className="text-link" href="https://github.com/RohanSi4/today-fitness-ios">
           View the iOS source
           <span aria-hidden="true">↗</span>
         </a>
