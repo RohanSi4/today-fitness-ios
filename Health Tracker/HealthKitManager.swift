@@ -32,7 +32,14 @@ protocol HealthDataProviding {
     ) async throws -> [Date: Double]
 }
 
-final class HealthKitManager: HealthDataProviding {
+protocol BodyWeightHealthStoring {
+    var isHealthDataAvailable: Bool { get }
+    func requestBodyWeightAuthorization() async throws
+    func saveBodyWeight(pounds: Double, date: Date) async throws -> UUID
+    func fetchBodyWeights(start: Date, end: Date) async throws -> [WeightEntry]
+}
+
+final class HealthKitManager: HealthDataProviding, BodyWeightHealthStoring {
     static let shared = HealthKitManager()
 
     var isHealthDataAvailable: Bool {
@@ -41,6 +48,7 @@ final class HealthKitManager: HealthDataProviding {
 
     private let store: HKHealthStore
     private let sessionAssembler = SleepSessionAssembler()
+    private var sleepObserverQuery: HKObserverQuery?
 
     private init(store: HKHealthStore = HKHealthStore()) {
         self.store = store
@@ -71,6 +79,111 @@ final class HealthKitManager: HealthDataProviding {
                 }
             }
         }
+    }
+
+    func requestBodyWeightAuthorization() async throws {
+        guard isHealthDataAvailable else {
+            throw HealthKitError.healthDataNotAvailable
+        }
+        guard let bodyMass = HKObjectType.quantityType(forIdentifier: .bodyMass) else {
+            throw HealthKitError.unsupportedType
+        }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            store.requestAuthorization(toShare: [bodyMass], read: [bodyMass]) { success, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if success {
+                    continuation.resume(returning: ())
+                } else {
+                    continuation.resume(throwing: HealthKitError.authorizationDenied)
+                }
+            }
+        }
+    }
+
+    func saveBodyWeight(pounds: Double, date: Date) async throws -> UUID {
+        guard let bodyMass = HKObjectType.quantityType(forIdentifier: .bodyMass) else {
+            throw HealthKitError.unsupportedType
+        }
+        let quantity = HKQuantity(unit: .pound(), doubleValue: pounds)
+        let sample = HKQuantitySample(type: bodyMass, quantity: quantity, start: date, end: date)
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            store.save(sample) { success, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if success {
+                    continuation.resume(returning: ())
+                } else {
+                    continuation.resume(throwing: HealthKitError.authorizationDenied)
+                }
+            }
+        }
+        return sample.uuid
+    }
+
+    func fetchBodyWeights(start: Date, end: Date) async throws -> [WeightEntry] {
+        guard let bodyMass = HKObjectType.quantityType(forIdentifier: .bodyMass) else {
+            throw HealthKitError.unsupportedType
+        }
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: end)
+        let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)
+
+        let samples: [HKQuantitySample] = try await withCheckedThrowingContinuation { continuation in
+            let query = HKSampleQuery(
+                sampleType: bodyMass,
+                predicate: predicate,
+                limit: HKObjectQueryNoLimit,
+                sortDescriptors: [sort]
+            ) { _, results, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: (results as? [HKQuantitySample]) ?? [])
+                }
+            }
+            store.execute(query)
+        }
+
+        return samples.map {
+            WeightEntry(
+                date: $0.startDate,
+                pounds: $0.quantity.doubleValue(for: .pound()),
+                healthKitID: $0.uuid
+            )
+        }
+    }
+
+    func startSleepWakeMonitoring(onWake: @escaping @Sendable (Date) -> Void) {
+        guard sleepObserverQuery == nil,
+              let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) else {
+            return
+        }
+
+        let query = HKObserverQuery(sampleType: sleepType, predicate: nil) { [weak self] _, completion, error in
+            guard error == nil, let self else {
+                completion()
+                return
+            }
+
+            Task {
+                defer { completion() }
+                let now = Date()
+                let start = Calendar.current.date(byAdding: .hour, value: -24, to: now) ?? now
+                guard let sessions = try? await self.fetchSleepSessions(start: start, end: now),
+                      let latest = sessions
+                        .filter({ $0.asleepDuration >= 3 * 3600 })
+                        .max(by: { $0.end < $1.end }),
+                      now.timeIntervalSince(latest.end) <= 90 * 60 else {
+                    return
+                }
+                onWake(latest.end)
+            }
+        }
+        sleepObserverQuery = query
+        store.execute(query)
+        store.enableBackgroundDelivery(for: sleepType, frequency: .immediate) { _, _ in }
     }
 
     func fetchSleepSessions(start: Date, end: Date) async throws -> [SleepSession] {

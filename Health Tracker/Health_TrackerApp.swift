@@ -16,6 +16,9 @@ struct Health_TrackerApp: App {
         _appState = StateObject(wrappedValue: state)
         NotificationManager.shared.appState = state
         NotificationManager.shared.register()
+        HealthKitManager.shared.startSleepWakeMonitoring { wakeTime in
+            NotificationManager.shared.scheduleWeightReminderAfterWake(wakeTime)
+        }
     }
 
     var body: some Scene {
