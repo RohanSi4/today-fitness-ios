@@ -71,6 +71,10 @@ Today adds a more detailed local mapping for the exercises that matter, includin
 The heat map scores completed working sets. It does not compare raw machine tonnage
 across unrelated exercises.
 
+Because I normally use lifting straps for back work, incidental grip work from an
+imported pulling exercise does not light the forearms. Curls can still give them a
+small amount of credit, and direct forearm exercises count fully.
+
 The base anatomy vectors are adapted from
 [`HichamELBSI/react-native-body-highlighter`](https://github.com/HichamELBSI/react-native-body-highlighter)
 under the MIT License. Today adds the front and back switch, smaller muscle splits,

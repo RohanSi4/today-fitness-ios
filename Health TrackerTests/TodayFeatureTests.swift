@@ -57,6 +57,27 @@ struct TodayStoreTests {
         #expect(pushdown.muscles.contains { $0.muscle == .tricepsMedialHead })
     }
 
+    @Test func strapsKeepIncidentalForearmWorkOutOfBackExercises() throws {
+        let catalog = ExerciseCatalog(cacheURL: temporaryURL("strap-catalog"))
+        let pulldown = try #require(catalog.exercise(id: "lat-pulldown"))
+        let row = try #require(catalog.exercise(id: "seated-machine-row"))
+        let wristCurl = try #require(catalog.exercise(id: "dumbbell-wrist-curl"))
+        let importedBackExercise = ExerciseCatalog.detailedFallback(
+            primary: ["lats"],
+            secondary: ["forearms", "biceps"]
+        )
+        let importedCurl = ExerciseCatalog.detailedFallback(
+            primary: ["biceps"],
+            secondary: ["forearms"]
+        )
+
+        #expect(!pulldown.muscles.contains { $0.muscle == .forearms })
+        #expect(!row.muscles.contains { $0.muscle == .forearms })
+        #expect(wristCurl.muscles.contains { $0.muscle == .forearms && $0.intensity == 1 })
+        #expect(!importedBackExercise.contains { $0.muscle == .forearms })
+        #expect(importedCurl.contains { $0.muscle == .forearms && $0.intensity == 0.45 })
+    }
+
     @Test func setsCanBeAddedAndRemovedWithoutDroppingCompletedWorkFirst() {
         let completed = LoggedSet(weight: 235, reps: 5, isComplete: true)
         let planned = LoggedSet(weight: 235, reps: 5, isComplete: false)

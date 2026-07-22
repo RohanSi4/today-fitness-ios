@@ -4,8 +4,6 @@ struct MuscleMapView: View {
     let scores: [MuscleGroup: Double]
     var compact = false
 
-    @State private var selectedSide: AnatomySide = .front
-
     private var activeMuscles: [MuscleGroup] {
         scores
             .filter { $0.value > 0 }
@@ -13,98 +11,32 @@ struct MuscleMapView: View {
             .map(\.key)
     }
 
-    private var activeSignature: String {
-        activeMuscles.map(\.rawValue).joined(separator: ",")
-    }
-
     var body: some View {
         VStack(spacing: compact ? 10 : 14) {
-            sidePicker
-
-            AnatomyFigure(side: selectedSide, scores: scores)
-                .frame(height: compact ? 420 : 500)
-                .frame(maxWidth: .infinity)
-                .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(minimumDistance: 24)
-                        .onEnded { value in
-                            guard abs(value.translation.width) > abs(value.translation.height) else { return }
-                            withAnimation(.snappy) {
-                                selectedSide = value.translation.width < 0 ? .back : .front
-                            }
-                        }
-                )
+            HStack(alignment: .bottom, spacing: compact ? 6 : 12) {
+                AnatomyFigureColumn(side: .front, scores: scores)
+                AnatomyFigureColumn(side: .back, scores: scores)
+            }
+            .frame(height: compact ? 330 : 390)
 
             muscleSummary
         }
         .frame(maxWidth: .infinity)
-        .onChange(of: activeSignature) { _, _ in
-            let currentScore = selectedSide.totalScore(in: scores)
-            let otherSide: AnatomySide = selectedSide == .front ? .back : .front
-            guard currentScore == 0, otherSide.totalScore(in: scores) > 0 else { return }
-            withAnimation(.snappy) {
-                selectedSide = otherSide
-            }
-        }
-        .accessibilityElement(children: .contain)
-    }
-
-    private var sidePicker: some View {
-        HStack(spacing: 4) {
-            ForEach(AnatomySide.allCases) { side in
-                Button {
-                    withAnimation(.snappy) {
-                        selectedSide = side
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Text(side.title)
-                        if side.activeCount(in: scores) > 0 {
-                            Text("\(side.activeCount(in: scores))")
-                                .font(.caption2.monospacedDigit().weight(.bold))
-                                .foregroundStyle(selectedSide == side ? .white : TodayPalette.muscle)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(
-                                    selectedSide == side
-                                        ? Color.white.opacity(0.22)
-                                        : TodayPalette.muscle.opacity(0.12),
-                                    in: Capsule()
-                                )
-                        }
-                    }
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(selectedSide == side ? .white : .secondary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(
-                        selectedSide == side ? TodayPalette.accent : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 11)
-                    )
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Show \(side.title.lowercased()) muscle map")
-                .accessibilityAddTraits(selectedSide == side ? .isSelected : [])
-            }
-        }
-        .padding(4)
-        .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilitySummary)
     }
 
     @ViewBuilder
     private var muscleSummary: some View {
-        let visible = selectedSide.activeMuscles(in: scores)
-        if visible.isEmpty {
-            Text(activeMuscles.isEmpty
-                 ? "Complete a set to light up the muscles you hit."
-                 : "Switch sides to see the muscles you hit.")
+        if activeMuscles.isEmpty {
+            Text("Complete a set to light up the muscles you hit.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         } else {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 7) {
-                    ForEach(visible) { muscle in
+                    ForEach(activeMuscles) { muscle in
                         HStack(spacing: 5) {
                             Circle()
                                 .fill(TodayPalette.muscle)
@@ -120,16 +52,20 @@ struct MuscleMapView: View {
                 }
                 .padding(.horizontal, 1)
             }
-            .accessibilityLabel("Muscles trained on the \(selectedSide.title.lowercased()): \(visible.map(\.title).joined(separator: ", "))")
         }
+    }
+
+    private var accessibilitySummary: String {
+        activeMuscles.isEmpty
+            ? "No completed muscle work yet"
+            : "Muscles trained: \(activeMuscles.map(\.title).joined(separator: ", "))"
     }
 }
 
-private enum AnatomySide: String, CaseIterable, Identifiable {
+private enum AnatomySide: String {
     case front
     case back
 
-    var id: Self { self }
     var title: String { rawValue.capitalized }
     var baseAsset: String { self == .front ? "MuscleFrontBase" : "MuscleBackBase" }
 
@@ -172,21 +108,6 @@ private enum AnatomySide: String, CaseIterable, Identifiable {
         }
     }
 
-    func activeMuscles(in scores: [MuscleGroup: Double]) -> [MuscleGroup] {
-        let visible = Set(overlays.flatMap(\.muscles))
-        return scores
-            .filter { $0.value > 0 && visible.contains($0.key) }
-            .sorted { $0.value > $1.value }
-            .map(\.key)
-    }
-
-    func activeCount(in scores: [MuscleGroup: Double]) -> Int {
-        activeMuscles(in: scores).count
-    }
-
-    func totalScore(in scores: [MuscleGroup: Double]) -> Double {
-        activeMuscles(in: scores).reduce(0) { $0 + (scores[$1] ?? 0) }
-    }
 }
 
 private struct AnatomyOverlay: Identifiable {
@@ -224,6 +145,23 @@ private struct AnatomyFigure: View {
         .aspectRatio(0.5, contentMode: .fit)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityHidden(true)
+    }
+}
+
+private struct AnatomyFigureColumn: View {
+    let side: AnatomySide
+    let scores: [MuscleGroup: Double]
+
+    var body: some View {
+        VStack(spacing: 4) {
+            AnatomyFigure(side: side, scores: scores)
+
+            Text(side.title.uppercased())
+                .font(.system(size: 9, weight: .bold, design: .rounded))
+                .tracking(1.2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 

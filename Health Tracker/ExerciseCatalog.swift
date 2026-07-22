@@ -129,13 +129,19 @@ final class ExerciseCatalog: ObservableObject {
         return .total
     }
 
-    private static func detailedFallback(primary: [String], secondary: [String]) -> [MuscleContribution] {
+    static func detailedFallback(primary: [String], secondary: [String]) -> [MuscleContribution] {
         var values: [MuscleGroup: Double] = [:]
         for name in primary {
             for muscle in mappedMuscles(name) { values[muscle, default: 0] = max(values[muscle] ?? 0, 1) }
         }
+        let backMuscles: Set<MuscleGroup> = [
+            .lats, .rhomboids, .upperTraps, .middleTraps, .lowerTraps, .lowerBack,
+        ]
+        let isStrappedPull = !backMuscles.isDisjoint(with: values.keys)
         for name in secondary {
-            for muscle in mappedMuscles(name) { values[muscle, default: 0] = max(values[muscle] ?? 0, 0.45) }
+            for muscle in mappedMuscles(name) where !(isStrappedPull && muscle == .forearms) {
+                values[muscle, default: 0] = max(values[muscle] ?? 0, 0.45)
+            }
         }
         return values.map(MuscleContribution.init).sorted { $0.muscle.rawValue < $1.muscle.rawValue }
     }
@@ -209,6 +215,14 @@ private extension ExerciseCatalog {
         exercise(
             "incline-dumbbell-curl", "Incline dumbbell curl", ["incline bench curl"], "dumbbells", .perHand,
             [.bicepsLongHead: 1, .bicepsShortHead: 0.65, .brachialis: 0.5, .forearms: 0.25]
+        ),
+        exercise(
+            "dumbbell-wrist-curl", "Dumbbell wrist curl", ["wrist curl", "forearm curl"], "dumbbells", .perHand,
+            [.forearms: 1]
+        ),
+        exercise(
+            "reverse-dumbbell-wrist-curl", "Reverse dumbbell wrist curl", ["reverse wrist curl"], "dumbbells", .perHand,
+            [.forearms: 1]
         ),
         exercise(
             "single-arm-cable-lateral-raise", "Single-arm cable lateral raise", ["shoulder cable single arm raise"], "cable", .total,
