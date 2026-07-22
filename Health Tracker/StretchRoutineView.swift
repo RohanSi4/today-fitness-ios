@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// A reference list of the run-day stretches. Tap a card to open its cue and
 /// a placeholder figure; the segmented control switches between the dynamic
@@ -56,6 +57,8 @@ private struct StretchCard: View {
     let stretch: Stretch
     @State private var isOpen = false
 
+    private var artwork: UIImage? { UIImage(named: stretch.assetName) }
+
     var body: some View {
         Button {
             withAnimation(.snappy(duration: 0.26)) { isOpen.toggle() }
@@ -64,10 +67,17 @@ private struct StretchCard: View {
                 HStack(spacing: 14) {
                     ZStack {
                         RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(TodayPalette.accent.opacity(0.12))
-                        Image(systemName: stretch.symbol)
-                            .font(.title2)
-                            .foregroundStyle(TodayPalette.accent)
+                            .fill(artwork == nil ? TodayPalette.accent.opacity(0.12) : Color(.secondarySystemBackground))
+                        if let artwork {
+                            Image(uiImage: artwork)
+                                .resizable()
+                                .scaledToFit()
+                                .padding(6)
+                        } else {
+                            Image(systemName: stretch.symbol)
+                                .font(.title2)
+                                .foregroundStyle(TodayPalette.accent)
+                        }
                     }
                     .frame(width: 50, height: 50)
 
@@ -91,12 +101,21 @@ private struct StretchCard: View {
 
                 if isOpen {
                     VStack(alignment: .leading, spacing: 14) {
-                        Image(systemName: stretch.symbol)
-                            .font(.system(size: 62))
-                            .foregroundStyle(TodayPalette.accent)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 4)
-                            .accessibilityHidden(true)
+                        Group {
+                            if let artwork {
+                                Image(uiImage: artwork)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(height: 150)
+                            } else {
+                                Image(systemName: stretch.symbol)
+                                    .font(.system(size: 62))
+                                    .foregroundStyle(TodayPalette.accent)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
+                        .accessibilityHidden(true)
 
                         Text(stretch.cue)
                             .font(.subheadline)

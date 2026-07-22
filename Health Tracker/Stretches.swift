@@ -71,10 +71,14 @@ struct Stretch: Identifiable, Hashable {
     let cue: String
     /// Plain-language area the stretch targets.
     let targets: String
-    /// SF Symbol placeholder standing in until real photos are attached.
+    /// SF Symbol placeholder shown until matching artwork is added.
     let symbol: String
     let phase: StretchPhase
     let style: StretchStyle
+
+    /// Asset-catalog name for the stretch's illustration. When an image with
+    /// this name exists it replaces the placeholder symbol on the card.
+    var assetName: String { "stretch-\(id)" }
 }
 
 /// The routine itself. Ordered to match how Rohan actually runs through it.
