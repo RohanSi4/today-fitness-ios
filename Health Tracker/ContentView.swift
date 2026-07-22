@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var appState: AppState
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var store = TodayStore.shared
     @StateObject private var planService = TrainingPlanService.shared
     @StateObject private var catalog = ExerciseCatalog.shared
@@ -43,19 +44,35 @@ struct ContentView: View {
             }
         }
         .onChange(of: intentRouter.route) { _, route in
-            guard let route else { return }
-            switch route {
-            case .weight:
-                appState.openWeightLogger()
-            case .today:
-                appState.selectedTab = .today
-            }
-            intentRouter.consume()
+            handleIntentRoute(route)
+        }
+        .task {
+            handleIntentRoute(intentRouter.route)
         }
         .onOpenURL { url in
             guard url.scheme == "today" else { return }
-            if url.host == "weight" { appState.openWeightLogger() }
+            switch url.host {
+            case "weight": appState.openWeightLogger()
+            case "workout": appState.openWorkout()
+            default: appState.selectedTab = .today
+            }
         }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { store.flushPersistence() }
+        }
+    }
+
+    private func handleIntentRoute(_ route: TodayIntentRoute?) {
+        guard let route else { return }
+        switch route {
+        case .weight:
+            appState.openWeightLogger()
+        case .workout:
+            appState.openWorkout()
+        case .today:
+            appState.selectedTab = .today
+        }
+        intentRouter.consume()
     }
 }
 

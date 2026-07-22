@@ -188,6 +188,10 @@ struct LoggedSet: Codable, Hashable, Identifiable {
     var weight: Double?
     var reps: Int
     var isComplete: Bool
+
+    var isPerformed: Bool {
+        isComplete && reps > 0
+    }
 }
 
 struct LoggedExercise: Codable, Hashable, Identifiable {
@@ -218,7 +222,7 @@ struct WorkoutSession: Codable, Hashable, Identifiable {
     var exercises: [LoggedExercise]
 
     var completedSetCount: Int {
-        exercises.flatMap(\.sets).filter(\.isComplete).count
+        exercises.flatMap(\.sets).filter(\.isPerformed).count
     }
 }
 
@@ -234,6 +238,26 @@ struct StoredTodayData: Codable {
     var workouts: [WorkoutSession] = []
     var activeWorkout: WorkoutSession?
     var goalWeight: Double = 175
+
+    init(
+        weights: [WeightEntry] = [],
+        workouts: [WorkoutSession] = [],
+        activeWorkout: WorkoutSession? = nil,
+        goalWeight: Double = 175
+    ) {
+        self.weights = weights
+        self.workouts = workouts
+        self.activeWorkout = activeWorkout
+        self.goalWeight = goalWeight
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        weights = try container.decodeIfPresent([WeightEntry].self, forKey: .weights) ?? []
+        workouts = try container.decodeIfPresent([WorkoutSession].self, forKey: .workouts) ?? []
+        activeWorkout = try container.decodeIfPresent(WorkoutSession.self, forKey: .activeWorkout)
+        goalWeight = try container.decodeIfPresent(Double.self, forKey: .goalWeight) ?? 175
+    }
 }
 
 struct DashboardEnvelope: Codable {

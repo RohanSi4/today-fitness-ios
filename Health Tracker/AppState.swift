@@ -16,6 +16,11 @@ final class AppState: ObservableObject {
         selectedTab = .today
         presentedSheet = .weight
     }
+
+    func openWorkout() {
+        selectedTab = .today
+        presentedSheet = .workout(suggested: nil)
+    }
 }
 
 enum TodaySheet: Identifiable {

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct WorkoutLogView: View {
     @Environment(\.dismiss) private var dismiss
@@ -8,6 +9,7 @@ struct WorkoutLogView: View {
     let kind: WorkoutKind
     @State private var draft: WorkoutSession
     @State private var showingExercisePicker = false
+    @State private var showingMuscleMap = false
     @State private var completedSession: WorkoutSession?
     @State private var showDiscardConfirmation = false
 
@@ -41,10 +43,7 @@ struct WorkoutLogView: View {
                     VStack(spacing: 16) {
                         watchReminder
 
-                        MuscleMapView(scores: store.muscleScores(for: draft, catalog: catalog), compact: true)
-                            .padding(14)
-                            .frame(maxWidth: .infinity)
-                            .todayCard()
+                        liveMuscleMap
 
                         ForEach($draft.exercises) { $loggedExercise in
                             if let exercise = catalog.exercise(id: loggedExercise.exerciseID) {
@@ -52,8 +51,22 @@ struct WorkoutLogView: View {
                                     exercise: exercise,
                                     loggedExercise: $loggedExercise,
                                     history: store.lastPerformance(for: exercise.id),
+                                    canMoveUp: draft.exercises.first?.id != loggedExercise.id,
+                                    canMoveDown: draft.exercises.last?.id != loggedExercise.id,
+                                    onMoveUp: {
+                                        moveExercise(loggedExercise.id, by: -1)
+                                    },
+                                    onMoveDown: {
+                                        moveExercise(loggedExercise.id, by: 1)
+                                    },
                                     onRemove: {
                                         draft.exercises.removeAll { $0.id == loggedExercise.id }
+                                    },
+                                    onFinished: {
+                                        guard let nextID = nextExerciseID(after: loggedExercise.id) else { return }
+                                        withAnimation(.snappy) {
+                                            proxy.scrollTo(nextID, anchor: .top)
+                                        }
                                     }
                                 )
                                 .id(loggedExercise.id)
@@ -99,11 +112,30 @@ struct WorkoutLogView: View {
                         .font(.subheadline.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") {
+                        UIApplication.shared.sendAction(
+                            #selector(UIResponder.resignFirstResponder),
+                            to: nil,
+                            from: nil,
+                            for: nil
+                        )
+                    }
+                    .fontWeight(.semibold)
+                }
             }
             .sheet(isPresented: $showingExercisePicker) {
-                ExercisePickerView(catalog: catalog, selectedIDs: Set(draft.exercises.map(\.exerciseID))) { exercise in
+                ExercisePickerView(
+                    catalog: catalog,
+                    selectedIDs: Set(draft.exercises.map(\.exerciseID)),
+                    recentIDs: recentExerciseIDs
+                ) { exercise in
                     draft.exercises.append(
-                        LoggedExercise(exerciseID: exercise.id, sets: catalog.defaultSets(for: exercise.id))
+                        LoggedExercise(
+                            exerciseID: exercise.id,
+                            sets: store.starterSets(for: exercise.id, catalog: catalog)
+                        )
                     )
                 }
             }
@@ -122,6 +154,81 @@ struct WorkoutLogView: View {
                 store.updateActiveWorkout(updated)
             }
         }
+    }
+
+    private var liveMuscleMap: some View {
+        VStack(spacing: 0) {
+            Button {
+                withAnimation(.snappy) { showingMuscleMap.toggle() }
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "figure.strengthtraining.traditional")
+                        .font(.title3)
+                        .foregroundStyle(TodayPalette.muscle)
+                        .frame(width: 38, height: 38)
+                        .background(TodayPalette.muscle.opacity(0.09), in: RoundedRectangle(cornerRadius: 11))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Muscle map")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                        Text(muscleMapStatus)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.down")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(showingMuscleMap ? 180 : 0))
+                }
+                .padding(14)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if showingMuscleMap {
+                Divider().padding(.horizontal, 14)
+                MuscleMapView(scores: store.muscleScores(for: draft, catalog: catalog), compact: true)
+                    .padding(14)
+                    .frame(maxWidth: .infinity)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .todayCard()
+    }
+
+    private var muscleMapStatus: String {
+        let count = store.muscleScores(for: draft, catalog: catalog).filter { $0.value > 0 }.count
+        if count == 0 { return "Fills in as you finish sets" }
+        return count == 1 ? "1 area hit so far" : "\(count) areas hit so far"
+    }
+
+    private var recentExerciseIDs: [String] {
+        var seen = Set<String>()
+        return store.workouts
+            .sorted { $0.startedAt > $1.startedAt }
+            .flatMap(\.exercises)
+            .map(\.exerciseID)
+            .filter { seen.insert($0).inserted }
+            .prefix(10)
+            .map { $0 }
+    }
+
+    private func moveExercise(_ id: UUID, by offset: Int) {
+        guard let source = draft.exercises.firstIndex(where: { $0.id == id }) else { return }
+        let destination = source + offset
+        guard draft.exercises.indices.contains(destination) else { return }
+        withAnimation(.snappy) {
+            draft.exercises.swapAt(source, destination)
+        }
+    }
+
+    private func nextExerciseID(after id: UUID) -> UUID? {
+        guard let index = draft.exercises.firstIndex(where: { $0.id == id }) else { return nil }
+        return draft.exercises.dropFirst(index + 1).first(where: { logged in
+            logged.sets.contains { !$0.isPerformed }
+        })?.id
     }
 
     private var watchReminder: some View {
@@ -147,9 +254,15 @@ private struct ExerciseLogCard: View {
     let exercise: ExerciseDefinition
     @Binding var loggedExercise: LoggedExercise
     let history: [LoggedExercise]
+    let canMoveUp: Bool
+    let canMoveDown: Bool
+    let onMoveUp: () -> Void
+    let onMoveDown: () -> Void
     let onRemove: () -> Void
+    let onFinished: () -> Void
 
     @State private var showingHistory = false
+    @State private var showingDetails = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -162,12 +275,25 @@ private struct ExerciseLogCard: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
+                if isComplete, !showingDetails {
+                    Button("Edit") {
+                        withAnimation(.snappy) { showingDetails = true }
+                    }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
                 Menu {
                     if !history.isEmpty {
                         Button("Last three sessions", systemImage: "clock.arrow.circlepath") {
                             showingHistory.toggle()
                         }
                     }
+                    Button("Move up", systemImage: "arrow.up", action: onMoveUp)
+                        .disabled(!canMoveUp)
+                    Button("Move down", systemImage: "arrow.down", action: onMoveDown)
+                        .disabled(!canMoveDown)
+                    Divider()
                     Button("Remove exercise", systemImage: "trash", role: .destructive, action: onRemove)
                 } label: {
                     Image(systemName: "ellipsis.circle")
@@ -176,62 +302,96 @@ private struct ExerciseLogCard: View {
                 }
             }
 
-            if showingHistory {
-                PreviousPerformanceView(history: history, exercise: exercise)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-
-            ForEach(Array(loggedExercise.sets.indices), id: \.self) { index in
-                SetLogRow(
-                    number: index + 1,
-                    exercise: exercise,
-                    set: $loggedExercise.sets[index],
-                    isNext: loggedExercise.sets.firstIndex(where: { !$0.isComplete }) == index
-                )
-            }
-
-            HStack {
-                Button {
-                    withAnimation(.snappy) {
-                        loggedExercise.removeOneSet()
-                    }
-                } label: {
-                    Label("Remove set", systemImage: "minus")
+            if showingDetails {
+                if showingHistory {
+                    PreviousPerformanceView(history: history, exercise: exercise)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                 }
-                .disabled(loggedExercise.sets.count <= 1)
-                .accessibilityLabel("Remove one set from \(exercise.name)")
 
-                Spacer()
+                ForEach(Array(loggedExercise.sets.indices), id: \.self) { index in
+                    SetLogRow(
+                        number: index + 1,
+                        exercise: exercise,
+                        set: $loggedExercise.sets[index],
+                        isNext: loggedExercise.sets.firstIndex(where: { !$0.isPerformed }) == index
+                    )
+                }
 
-                Text(loggedExercise.sets.count == 1 ? "1 set" : "\(loggedExercise.sets.count) sets")
+                HStack {
+                    Button {
+                        withAnimation(.snappy) {
+                            loggedExercise.removeOneSet()
+                        }
+                    } label: {
+                        Label("Remove set", systemImage: "minus")
+                    }
+                    .disabled(loggedExercise.sets.count <= 1)
+                    .accessibilityLabel("Remove one set from \(exercise.name)")
+
+                    Spacer()
+
+                    Text(loggedExercise.sets.count == 1 ? "1 set" : "\(loggedExercise.sets.count) sets")
+                        .foregroundStyle(.secondary)
+
+                    Spacer()
+
+                    Button {
+                        withAnimation(.snappy) {
+                            loggedExercise.addSet()
+                        }
+                    } label: {
+                        Label("Add set", systemImage: "plus")
+                    }
+                    .accessibilityLabel("Add one set to \(exercise.name)")
+                }
+                .buttonStyle(.plain)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(TodayPalette.accent)
+            } else {
+                Text(completedSummary)
+                    .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
-
-                Spacer()
-
-                Button {
-                    withAnimation(.snappy) {
-                        loggedExercise.addSet()
-                    }
-                } label: {
-                    Label("Add set", systemImage: "plus")
-                }
-                .accessibilityLabel("Add one set to \(exercise.name)")
+                    .lineLimit(1)
             }
-            .buttonStyle(.plain)
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(TodayPalette.accent)
         }
         .padding(16)
         .todayCard()
+        .onChange(of: isComplete) { wasComplete, nowComplete in
+            guard nowComplete, !wasComplete else { return }
+            withAnimation(.snappy) { showingDetails = false }
+            onFinished()
+        }
     }
 
     private var exerciseSubtitle: String {
+        if let previous = history.first {
+            let sets = previous.sets.filter(\.isPerformed).prefix(3).map { set in
+                if exercise.loadMode == .bodyweight || set.weight == nil {
+                    return "\(set.reps) reps"
+                }
+                return "\(set.weight!.formatted(.number.precision(.fractionLength(0...1)))) × \(set.reps)"
+            }
+            if !sets.isEmpty { return "Last: \(sets.joined(separator: ", "))" }
+        }
         let muscles = exercise.muscles
             .sorted { $0.intensity > $1.intensity }
             .prefix(3)
             .map { $0.muscle.title }
             .joined(separator: " · ")
         return muscles.isEmpty ? exercise.equipment.capitalized : muscles
+    }
+
+    private var isComplete: Bool {
+        !loggedExercise.sets.isEmpty && loggedExercise.sets.allSatisfy(\.isPerformed)
+    }
+
+    private var completedSummary: String {
+        loggedExercise.sets.filter(\.isPerformed).map { set in
+            if exercise.loadMode == .bodyweight || set.weight == nil {
+                return "\(set.reps) reps"
+            }
+            return "\(set.weight!.formatted(.number.precision(.fractionLength(0...1)))) × \(set.reps)"
+        }.joined(separator: "  ·  ")
     }
 }
 
@@ -249,7 +409,7 @@ private struct SetLogRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 4) {
             Text("\(number)")
                 .font(.subheadline.monospacedDigit().weight(.bold))
                 .foregroundStyle(.secondary)
@@ -261,7 +421,8 @@ private struct SetLogRow: View {
                     step: exercise.weightIncrement,
                     minimum: 0,
                     label: exercise.loadMode.shortLabel,
-                    fractionDigits: 0...1
+                    fractionDigits: 0...1,
+                    accessibilityName: "\(exercise.name), set \(number), weight"
                 )
             } else {
                 Text("Bodyweight")
@@ -269,7 +430,11 @@ private struct SetLogRow: View {
                     .frame(maxWidth: .infinity)
             }
 
-            IntValueControl(value: $set.reps, label: repLabel)
+            IntValueControl(
+                value: $set.reps,
+                label: repLabel,
+                accessibilityName: "\(exercise.name), set \(number), reps"
+            )
 
             Button {
                 withAnimation(.snappy) { set.isComplete.toggle() }
@@ -280,7 +445,13 @@ private struct SetLogRow: View {
                     .contentTransition(.symbolEffect(.replace))
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(set.isComplete ? "Mark set incomplete" : "Complete set")
+            .disabled(!set.isComplete && set.reps == 0)
+            .accessibilityLabel(
+                set.isComplete
+                    ? "Mark set \(number) of \(exercise.name) incomplete"
+                    : "Complete set \(number) of \(exercise.name)"
+            )
+            .frame(width: 44, height: 44)
         }
         .padding(10)
         .background(
@@ -292,6 +463,9 @@ private struct SetLogRow: View {
                 RoundedRectangle(cornerRadius: 15)
                     .stroke(TodayPalette.accent.opacity(0.5), lineWidth: 1.5)
             }
+        }
+        .sensoryFeedback(.success, trigger: set.isComplete) { wasComplete, isComplete in
+            !wasComplete && isComplete
         }
     }
 
@@ -306,14 +480,17 @@ private struct ValueControl: View {
     let minimum: Double
     let label: String
     let fractionDigits: ClosedRange<Int>
+    let accessibilityName: String
 
     var body: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 2) {
             Button { value = max(minimum, value - step) } label: {
                 Image(systemName: "minus")
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Decrease weight by \(step.formatted())")
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
+            .accessibilityLabel("Decrease \(accessibilityName) by \(step.formatted())")
 
             VStack(spacing: 0) {
                 TextField("0", value: $value, format: .number.precision(.fractionLength(fractionDigits)))
@@ -321,6 +498,7 @@ private struct ValueControl: View {
                     .multilineTextAlignment(.center)
                     .font(.headline.monospacedDigit())
                     .frame(minWidth: 42)
+                    .accessibilityLabel(accessibilityName)
                 Text(label)
                     .font(.system(size: 9))
                     .foregroundStyle(.secondary)
@@ -331,7 +509,9 @@ private struct ValueControl: View {
                 Image(systemName: "plus")
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Increase weight by \(step.formatted())")
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
+            .accessibilityLabel("Increase \(accessibilityName) by \(step.formatted())")
         }
         .frame(maxWidth: .infinity)
     }
@@ -340,27 +520,33 @@ private struct ValueControl: View {
 private struct IntValueControl: View {
     @Binding var value: Int
     let label: String
+    let accessibilityName: String
 
     var body: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 2) {
             Button { value = max(0, value - 1) } label: { Image(systemName: "minus") }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Decrease reps")
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+                .accessibilityLabel("Decrease \(accessibilityName)")
             VStack(spacing: 0) {
                 TextField("0", value: $value, format: .number)
                     .keyboardType(.numberPad)
                     .multilineTextAlignment(.center)
                     .font(.headline.monospacedDigit())
                     .frame(minWidth: 28)
+                    .accessibilityLabel(accessibilityName)
                 Text(label)
                     .font(.system(size: 9))
                     .foregroundStyle(.secondary)
             }
             Button { value += 1 } label: { Image(systemName: "plus") }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Increase reps")
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+                .accessibilityLabel("Increase \(accessibilityName)")
         }
-        .frame(width: 82)
+        .frame(width: 120)
     }
 }
 
@@ -375,7 +561,7 @@ private struct PreviousPerformanceView: View {
                     Text(index == 0 ? "Last" : "\(index + 1) back")
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Text(entry.sets.filter(\.isComplete).map(setText).joined(separator: ", "))
+                    Text(entry.sets.filter(\.isPerformed).map(setText).joined(separator: ", "))
                         .font(.caption.monospacedDigit().weight(.semibold))
                 }
                 .font(.caption)
@@ -397,41 +583,87 @@ private struct ExercisePickerView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var catalog: ExerciseCatalog
     let selectedIDs: Set<String>
+    let recentIDs: [String]
     let onSelect: (ExerciseDefinition) -> Void
 
     @State private var query = ""
+    @State private var addedIDs: Set<String>
+
+    init(
+        catalog: ExerciseCatalog,
+        selectedIDs: Set<String>,
+        recentIDs: [String],
+        onSelect: @escaping (ExerciseDefinition) -> Void
+    ) {
+        self.catalog = catalog
+        self.selectedIDs = selectedIDs
+        self.recentIDs = recentIDs
+        self.onSelect = onSelect
+        _addedIDs = State(initialValue: selectedIDs)
+    }
 
     var body: some View {
         NavigationStack {
-            List(catalog.search(query)) { exercise in
-                Button {
-                    onSelect(exercise)
-                    dismiss()
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: selectedIDs.contains(exercise.id) ? "checkmark.circle.fill" : "dumbbell.fill")
-                            .foregroundStyle(selectedIDs.contains(exercise.id) ? .green : TodayPalette.accent)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(exercise.name).foregroundStyle(.primary)
-                            Text(exercise.muscles.sorted { $0.intensity > $1.intensity }.prefix(3).map { $0.muscle.title }.joined(separator: " · "))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
+            List {
+                if query.isEmpty, !recentExercises.isEmpty {
+                    Section("Recent") {
+                        ForEach(recentExercises) { exercise in
+                            exerciseRow(exercise)
                         }
                     }
                 }
-                .disabled(selectedIDs.contains(exercise.id))
+
+                Section(query.isEmpty ? "Browse" : "Results") {
+                    ForEach(searchResults) { exercise in
+                        exerciseRow(exercise)
+                    }
+                }
             }
             .searchable(text: $query, prompt: "Search 700+ exercises")
-            .navigationTitle("Add exercise")
+            .navigationTitle("Add exercises")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                        .fontWeight(.semibold)
                 }
             }
             .task { await catalog.refreshIfNeeded() }
         }
+    }
+
+    private var recentExercises: [ExerciseDefinition] {
+        recentIDs.compactMap(catalog.exercise(id:)).filter { !selectedIDs.contains($0.id) }
+    }
+
+    private var searchResults: [ExerciseDefinition] {
+        let recent = Set(recentExercises.map(\.id))
+        return catalog.search(query).filter { !query.isEmpty || !recent.contains($0.id) }
+    }
+
+    private func exerciseRow(_ exercise: ExerciseDefinition) -> some View {
+        Button {
+            guard !addedIDs.contains(exercise.id) else { return }
+            onSelect(exercise)
+            addedIDs.insert(exercise.id)
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: addedIDs.contains(exercise.id) ? "checkmark.circle.fill" : "plus.circle.fill")
+                    .foregroundStyle(addedIDs.contains(exercise.id) ? .green : TodayPalette.accent)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(exercise.name).foregroundStyle(.primary)
+                    Text(exercise.muscles.sorted { $0.intensity > $1.intensity }.prefix(3).map { $0.muscle.title }.joined(separator: " · "))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+            }
+        }
+        .disabled(addedIDs.contains(exercise.id))
     }
 }
 
@@ -461,6 +693,12 @@ struct WorkoutSummaryView: View {
                                 : "\(session.completedSetCount) working sets"
                         )
                             .foregroundStyle(.secondary)
+                    }
+
+                    HStack(spacing: 10) {
+                        summaryMetric(session.exercises.filter { $0.sets.contains(where: \.isPerformed) }.count, "exercises")
+                        summaryMetric(session.completedSetCount, "sets")
+                        summaryMetric(durationLabel, "time")
                     }
 
                     MuscleMapView(scores: scores)
@@ -502,6 +740,32 @@ struct WorkoutSummaryView: View {
                 }
             }
         }
+    }
+
+    private var durationLabel: String {
+        let end = session.endedAt ?? Date()
+        let minutes = max(1, Int(end.timeIntervalSince(session.startedAt) / 60))
+        if minutes < 60 { return "\(minutes)m" }
+        return "\(minutes / 60)h \(minutes % 60)m"
+    }
+
+    private func summaryMetric(_ value: Int, _ label: String) -> some View {
+        summaryMetric("\(value)", label)
+    }
+
+    private func summaryMetric(_ value: String, _ label: String) -> some View {
+        VStack(spacing: 3) {
+            Text(value)
+                .font(.subheadline.monospacedDigit().weight(.bold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+        .todayCard()
     }
 }
 

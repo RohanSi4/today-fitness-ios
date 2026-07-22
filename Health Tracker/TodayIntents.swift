@@ -5,6 +5,7 @@ import Foundation
 enum TodayIntentRoute: Equatable {
     case today
     case weight
+    case workout
 }
 
 @MainActor
@@ -43,6 +44,19 @@ struct OpenTodayIntent: AppIntent {
     }
 }
 
+struct StartWorkoutIntent: AppIntent {
+    static let title: LocalizedStringResource = "Start a workout"
+    static let description = IntentDescription("Open Today directly to the private workout picker.")
+    static let openAppWhenRun = true
+
+    func perform() async throws -> some IntentResult {
+        await MainActor.run {
+            TodayIntentRouter.shared.route = .workout
+        }
+        return .result()
+    }
+}
+
 struct TodayShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
@@ -59,6 +73,15 @@ struct TodayShortcuts: AppShortcutsProvider {
             phrases: ["Show my plan in \(.applicationName)"],
             shortTitle: "Today’s plan",
             systemImageName: "figure.run"
+        )
+        AppShortcut(
+            intent: StartWorkoutIntent(),
+            phrases: [
+                "Start a workout in \(.applicationName)",
+                "Track my workout with \(.applicationName)"
+            ],
+            shortTitle: "Start workout",
+            systemImageName: "dumbbell.fill"
         )
     }
 }

@@ -9,9 +9,11 @@ final class TodayStore: ObservableObject {
     @Published private(set) var workouts: [WorkoutSession] = []
     @Published var activeWorkout: WorkoutSession?
     @Published var goalWeight: Double = 175
+    @Published private(set) var dataRecoveryMessage: String?
 
     private let storageURL: URL
     private let calendar: Calendar
+    private var pendingPersistTask: Task<Void, Never>?
 
     init(storageURL: URL? = nil, calendar: Calendar = .current) {
         self.calendar = calendar
@@ -45,11 +47,12 @@ final class TodayStore: ObservableObject {
 
     func completedWorkoutToday(kind: WorkoutKind) -> WorkoutSession? {
         workouts.first { workout in
-            workout.kind == kind && calendar.isDateInToday(workout.startedAt)
+            workout.kind == kind && calendar.isDateInToday(workout.endedAt ?? workout.startedAt)
         }
     }
 
     func recordWeight(_ pounds: Double, on date: Date = Date(), healthKitID: UUID? = nil) {
+        guard pounds.isFinite, pounds > 0, pounds < 1_000 else { return }
         let day = calendar.startOfDay(for: date)
         weights.removeAll { calendar.isDate($0.date, inSameDayAs: day) }
         weights.append(WeightEntry(date: date, pounds: pounds, healthKitID: healthKitID))
@@ -58,7 +61,9 @@ final class TodayStore: ObservableObject {
     }
 
     func mergeHealthWeights(_ entries: [WeightEntry]) {
-        for entry in entries.sorted(by: { $0.date < $1.date }) {
+        for entry in entries
+            .filter({ $0.pounds.isFinite && $0.pounds > 0 && $0.pounds < 1_000 })
+            .sorted(by: { $0.date < $1.date }) {
             weights.removeAll { calendar.isDate($0.date, inSameDayAs: entry.date) }
             weights.append(entry)
         }
@@ -79,11 +84,11 @@ final class TodayStore: ObservableObject {
 
     func updateActiveWorkout(_ workout: WorkoutSession) {
         activeWorkout = workout
-        persist()
+        schedulePersist()
     }
 
     func finishActiveWorkout() -> WorkoutSession? {
-        guard var workout = activeWorkout else { return nil }
+        guard var workout = activeWorkout, workout.completedSetCount > 0 else { return nil }
         workout.endedAt = Date()
         workouts.insert(workout, at: 0)
         activeWorkout = nil
@@ -96,11 +101,28 @@ final class TodayStore: ObservableObject {
         persist()
     }
 
+    func deleteWorkout(id: UUID) {
+        workouts.removeAll { $0.id == id }
+        persist()
+    }
+
+    func flushPersistence() {
+        pendingPersistTask?.cancel()
+        pendingPersistTask = nil
+        persist()
+    }
+
+    func dismissRecoveryMessage() {
+        dataRecoveryMessage = nil
+    }
+
     func lastPerformance(for exerciseID: String, limit: Int = 3) -> [LoggedExercise] {
         workouts
             .sorted { $0.startedAt > $1.startedAt }
             .compactMap { session in
-                session.exercises.first { $0.exerciseID == exerciseID }
+                session.exercises.first {
+                    $0.exerciseID == exerciseID && $0.sets.contains(where: \.isPerformed)
+                }
             }
             .prefix(limit)
             .map { $0 }
@@ -110,7 +132,7 @@ final class TodayStore: ObservableObject {
         var scores: [MuscleGroup: Double] = [:]
         for loggedExercise in workout.exercises {
             guard let exercise = catalog.exercise(id: loggedExercise.exerciseID) else { continue }
-            let completedSets = Double(loggedExercise.sets.filter(\.isComplete).count)
+            let completedSets = Double(loggedExercise.sets.filter(\.isPerformed).count)
             guard completedSets > 0 else { continue }
             for contribution in exercise.muscles {
                 scores[contribution.muscle, default: 0] += completedSets * contribution.intensity
@@ -119,37 +141,74 @@ final class TodayStore: ObservableObject {
         return scores
     }
 
+    func starterSets(for exerciseID: String, catalog: ExerciseCatalog) -> [LoggedSet] {
+        let previousSets = lastPerformance(for: exerciseID, limit: 1)
+            .first?.sets.filter(\.isPerformed) ?? []
+        let fallback = catalog.defaultSets(for: exerciseID)
+        let first = previousSets.first ?? fallback.first ?? LoggedSet(weight: nil, reps: 8, isComplete: false)
+        let second = previousSets.dropFirst().first ?? fallback.dropFirst().first ?? first
+        return [first, second].map {
+            LoggedSet(weight: $0.weight, reps: $0.reps, isComplete: false)
+        }
+    }
+
     private func starterExercises(for kind: WorkoutKind, catalog: ExerciseCatalog) -> [LoggedExercise] {
         let prior = kind == .other ? nil : workouts.first { $0.kind == kind }
-        let ids = prior?.exercises.map(\.exerciseID) ?? catalog.defaultExerciseIDs(for: kind)
+        let candidates = prior?.exercises.map(\.exerciseID) ?? catalog.defaultExerciseIDs(for: kind)
+        var seen = Set<String>()
+        let ids = candidates.filter { id in
+            seen.insert(id).inserted && catalog.exercise(id: id) != nil
+        }
 
         return ids.map { exerciseID in
-            let previousSets = lastPerformance(for: exerciseID, limit: 1).first?.sets.filter(\.isComplete) ?? []
-            let fallback = catalog.defaultSets(for: exerciseID)
-            let first = previousSets.first ?? fallback.first ?? LoggedSet(weight: nil, reps: 8, isComplete: false)
-            let second = previousSets.dropFirst().first ?? fallback.dropFirst().first ?? first
             return LoggedExercise(
                 exerciseID: exerciseID,
-                sets: [
-                    LoggedSet(weight: first.weight, reps: first.reps, isComplete: false),
-                    LoggedSet(weight: second.weight, reps: second.reps, isComplete: false)
-                ]
+                sets: starterSets(for: exerciseID, catalog: catalog)
             )
         }
     }
 
     private func load() {
-        guard let data = try? Data(contentsOf: storageURL),
-              let stored = try? JSONDecoder().decode(StoredTodayData.self, from: data) else {
+        guard FileManager.default.fileExists(atPath: storageURL.path) else { return }
+        if let stored = decodeStoredData(at: storageURL) {
+            apply(stored)
             return
         }
+
+        let backupURL = storageURL.appendingPathExtension("backup")
+        if let stored = decodeStoredData(at: backupURL) {
+            apply(stored)
+            dataRecoveryMessage = "Today restored the last good copy of your private data."
+            persist()
+        } else {
+            dataRecoveryMessage = "Today could not read the saved data. The original file was left in place."
+        }
+    }
+
+    private func decodeStoredData(at url: URL) -> StoredTodayData? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(StoredTodayData.self, from: data)
+    }
+
+    private func apply(_ stored: StoredTodayData) {
         weights = stored.weights.sorted { $0.date > $1.date }
         workouts = stored.workouts.sorted { $0.startedAt > $1.startedAt }
         activeWorkout = stored.activeWorkout
-        goalWeight = stored.goalWeight
+        goalWeight = stored.goalWeight.isFinite && stored.goalWeight > 0 ? stored.goalWeight : 175
+    }
+
+    private func schedulePersist() {
+        pendingPersistTask?.cancel()
+        pendingPersistTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            self?.persist()
+        }
     }
 
     private func persist() {
+        pendingPersistTask?.cancel()
+        pendingPersistTask = nil
         let value = StoredTodayData(
             weights: weights,
             workouts: workouts,
@@ -162,7 +221,14 @@ final class TodayStore: ObservableObject {
                 withIntermediateDirectories: true
             )
             let data = try JSONEncoder().encode(value)
-            try data.write(to: storageURL, options: .atomic)
+            if let existing = try? Data(contentsOf: storageURL),
+               (try? JSONDecoder().decode(StoredTodayData.self, from: existing)) != nil {
+                try? existing.write(
+                    to: storageURL.appendingPathExtension("backup"),
+                    options: [.atomic, .completeFileProtection]
+                )
+            }
+            try data.write(to: storageURL, options: [.atomic, .completeFileProtection])
         } catch {
             assertionFailure("Could not persist Today data: \(error)")
         }

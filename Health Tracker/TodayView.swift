@@ -119,9 +119,13 @@ struct TodayView: View {
                 )
             } else {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("Nothing planned today")
+                    Text(planService.errorMessage == nil ? "Nothing planned today" : "Plan could not refresh")
                         .font(.title3.weight(.bold))
-                    Text("You can still start any workout below.")
+                    Text(
+                        planService.errorMessage == nil
+                            ? "You can still start any workout below."
+                            : "The saved plan does not cover today. You can still start any workout below."
+                    )
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }

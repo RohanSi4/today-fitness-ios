@@ -18,6 +18,17 @@ struct TodayStoreTests {
         #expect(!store.weights.contains { $0.pounds == 184.4 })
     }
 
+    @Test func invalidWeightsAreIgnored() {
+        let store = TodayStore(storageURL: temporaryURL("invalid-weight"))
+
+        store.recordWeight(0)
+        store.recordWeight(-2)
+        store.recordWeight(.infinity)
+        store.recordWeight(.nan)
+
+        #expect(store.weights.isEmpty)
+    }
+
     @Test func nextWorkoutAlwaysStartsWithTwoSets() throws {
         let store = TodayStore(storageURL: temporaryURL("sets"))
         let catalog = ExerciseCatalog(cacheURL: temporaryURL("catalog"))
@@ -33,6 +44,110 @@ struct TodayStoreTests {
         store.beginWorkout(kind: .upper, catalog: catalog)
         let next = try #require(store.activeWorkout)
         #expect(next.exercises[0].sets.count == 2)
+    }
+
+    @Test func anAddedExerciseReusesTheLastPerformedValues() throws {
+        let store = TodayStore(storageURL: temporaryURL("starter-values"))
+        let catalog = ExerciseCatalog(cacheURL: temporaryURL("starter-catalog"))
+        store.beginWorkout(kind: .upper, catalog: catalog)
+        var workout = try #require(store.activeWorkout)
+        workout.exercises[0].sets = [
+            LoggedSet(weight: 235, reps: 5, isComplete: true),
+            LoggedSet(weight: 240, reps: 4, isComplete: true),
+        ]
+        store.updateActiveWorkout(workout)
+        _ = store.finishActiveWorkout()
+
+        let sets = store.starterSets(for: workout.exercises[0].exerciseID, catalog: catalog)
+
+        #expect(sets.count == 2)
+        #expect(sets[0].weight == 235)
+        #expect(sets[0].reps == 5)
+        #expect(sets[1].weight == 240)
+        #expect(sets[1].reps == 4)
+        #expect(sets.allSatisfy { !$0.isComplete })
+    }
+
+    @Test func zeroRepSetsDoNotCountAndCannotFinishAWorkout() throws {
+        let store = TodayStore(storageURL: temporaryURL("zero-rep"))
+        let catalog = ExerciseCatalog(cacheURL: temporaryURL("zero-rep-catalog"))
+        store.beginWorkout(kind: .upper, catalog: catalog)
+        var workout = try #require(store.activeWorkout)
+        workout.exercises[0].sets[0] = LoggedSet(weight: 235, reps: 0, isComplete: true)
+        store.updateActiveWorkout(workout)
+
+        #expect(workout.completedSetCount == 0)
+        #expect(store.finishActiveWorkout() == nil)
+        #expect(store.activeWorkout != nil)
+        #expect(store.workouts.isEmpty)
+        #expect(store.muscleScores(for: workout, catalog: catalog).isEmpty)
+    }
+
+    @Test func lastPerformanceSkipsAnEntryWithNoPerformedSets() throws {
+        let store = TodayStore(storageURL: temporaryURL("performed-history"))
+        let catalog = ExerciseCatalog(cacheURL: temporaryURL("performed-catalog"))
+        store.beginWorkout(kind: .upper, catalog: catalog)
+        var performed = try #require(store.activeWorkout)
+        let exerciseID = performed.exercises[0].exerciseID
+        performed.exercises[0].sets[0] = LoggedSet(weight: 235, reps: 5, isComplete: true)
+        store.updateActiveWorkout(performed)
+        _ = store.finishActiveWorkout()
+
+        store.beginWorkout(kind: .upper, catalog: catalog)
+        var newer = try #require(store.activeWorkout)
+        newer.exercises[0].sets[0] = LoggedSet(weight: 250, reps: 5, isComplete: false)
+        newer.exercises[1].sets[0].isComplete = true
+        store.updateActiveWorkout(newer)
+        #expect(store.finishActiveWorkout() != nil)
+
+        let history = store.lastPerformance(for: exerciseID)
+        #expect(history.count == 1)
+        #expect(history[0].sets.contains { $0.weight == 235 && $0.isPerformed })
+    }
+
+    @Test func completedWorkoutCanBeDeleted() throws {
+        let store = TodayStore(storageURL: temporaryURL("delete-workout"))
+        let catalog = ExerciseCatalog(cacheURL: temporaryURL("delete-catalog"))
+        store.beginWorkout(kind: .upper, catalog: catalog)
+        var workout = try #require(store.activeWorkout)
+        workout.exercises[0].sets[0].isComplete = true
+        store.updateActiveWorkout(workout)
+        let finished = try #require(store.finishActiveWorkout())
+
+        store.deleteWorkout(id: finished.id)
+
+        #expect(store.workouts.isEmpty)
+    }
+
+    @Test func activeWorkoutSurvivesStoreRelaunch() throws {
+        let url = temporaryURL("active-relaunch")
+        let catalog = ExerciseCatalog(cacheURL: temporaryURL("active-relaunch-catalog"))
+        let firstStore = TodayStore(storageURL: url)
+        firstStore.beginWorkout(kind: .lower, catalog: catalog)
+        var workout = try #require(firstStore.activeWorkout)
+        workout.exercises[0].sets[0].weight = 125
+        firstStore.updateActiveWorkout(workout)
+        firstStore.flushPersistence()
+
+        let relaunched = TodayStore(storageURL: url)
+
+        #expect(relaunched.activeWorkout?.kind == .lower)
+        #expect(relaunched.activeWorkout?.exercises[0].sets[0].weight == 125)
+    }
+
+    @Test func corruptPrimaryRestoresTheLastGoodBackup() throws {
+        let url = temporaryURL("backup-recovery")
+        let store = TodayStore(storageURL: url, calendar: utcCalendar)
+        let firstDay = Date(timeIntervalSince1970: 1_753_075_200)
+        store.recordWeight(184.4, on: firstDay)
+        store.recordWeight(183.9, on: firstDay.addingTimeInterval(86_400))
+        try Data("not-json".utf8).write(to: url, options: .atomic)
+
+        let recovered = TodayStore(storageURL: url, calendar: utcCalendar)
+
+        #expect(recovered.weights.count == 1)
+        #expect(recovered.weights[0].pounds == 184.4)
+        #expect(recovered.dataRecoveryMessage != nil)
     }
 
     @Test func everyWorkoutStartingPointIsAvailable() {
