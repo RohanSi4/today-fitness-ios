@@ -201,3 +201,14 @@ The next justified Watch slice is a read-only Smart Stack widget for today’s r
 Upper or Lower plan. It should appear only when the wrist glance proves more useful than
 the existing plan shortcut. On iPhone, a Lock Screen widget and workout Live Activity
 can reuse the same App Intents without changing who owns the workout record.
+
+## Future food tracking
+
+Once the weight and workout loop is proven, Today could add a rough food estimator. The
+goal would not be another MyFitnessPal or perfect calorie accounting. It would make basic
+awareness easy enough to keep using: describe a meal in a few words, get an editable
+calorie and protein estimate, and see a simple daily range alongside longer-term weight
+trends. Exact ingredients, barcode scanning, and detailed macro targets can stay optional.
+
+Food history should remain private by default. Any future coach connection should use a
+small derived summary only after the estimator is accurate enough to be useful.
