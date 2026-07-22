@@ -546,6 +546,7 @@
 				DEVELOPMENT_TEAM = 46Q2G4XNBY;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Health Tracker-Info.plist";
 				INFOPLIST_KEY_CFBundleName = Today;
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Today reads body weight, sleep, and activity data to show your private trends and daily recap.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Today saves the body weight you enter to Apple Health so your private health record stays complete.";
@@ -580,6 +581,7 @@
 				DEVELOPMENT_TEAM = 46Q2G4XNBY;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Health Tracker-Info.plist";
 				INFOPLIST_KEY_CFBundleName = Today;
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Today reads body weight, sleep, and activity data to show your private trends and daily recap.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Today saves the body weight you enter to Apple Health so your private health record stays complete.";
