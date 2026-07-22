@@ -9,7 +9,7 @@ Two ways to use it:
        export OPENAI_API_KEY=sk-...
        python3 generate.py --install
 
-  2. No key — you generated the PNGs yourself (ChatGPT/Midjourney/etc.):
+  2. No key: you generated the PNGs yourself (ChatGPT/Midjourney/etc.):
        save each as out/stretch-<id>.png  (ids are printed by --list)
        python3 generate.py --install-local out
 
@@ -20,7 +20,9 @@ import argparse
 import base64
 import json
 import os
+import subprocess
 import sys
+import tempfile
 import urllib.request
 from pathlib import Path
 
@@ -91,12 +93,31 @@ def api_generate(stretch_id: str) -> bytes:
 def install(stretch_id: str, png: bytes) -> None:
     imageset = CATALOG / f"stretch-{stretch_id}.imageset"
     imageset.mkdir(parents=True, exist_ok=True)
-    (imageset / f"stretch-{stretch_id}.png").write_bytes(png)
+    (imageset / f"stretch-{stretch_id}.png").write_bytes(resize_for_app(png))
     contents = {
         "images": [{"filename": f"stretch-{stretch_id}.png", "idiom": "universal"}],
         "info": {"author": "xcode", "version": 1},
     }
     (imageset / "Contents.json").write_text(json.dumps(contents, indent=2))
+
+
+def resize_for_app(png: bytes) -> bytes:
+    """Keep source generation flexible while capping shipped art at 512 px."""
+    sips = Path("/usr/bin/sips")
+    if not sips.exists():
+        return png
+
+    with tempfile.TemporaryDirectory() as directory:
+        source = Path(directory) / "source.png"
+        output = Path(directory) / "output.png"
+        source.write_bytes(png)
+        subprocess.run(
+            [str(sips), "-Z", "512", str(source), "--out", str(output)],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return output.read_bytes()
 
 
 def main() -> None:

@@ -43,6 +43,9 @@ it can become a reusable starter after the real workflow is proven.
 - Lets exercises move up or down when gym equipment is busy
 - Lets me close a workout, use the rest of the app, and resume with every set intact
 - Keeps discard in a secondary menu with a confirmation instead of making it the main exit
+- Keeps run stretches as a quick visual reference instead of making every session a checklist
+- Focuses the warm-up on seven marathon-relevant dynamic moves and trims the post-run list to five useful holds
+- Adds an optional hands-free timer with 30-second holds, 5-second switches, pause, back, skip, and a wheel step picker
 - Searches an offline-cached catalog of more than 700 lifting exercises
 - Lights up a detailed front and back muscle map as sets are completed
 - Keeps the full muscle map tucked away during the workout, then shows it in the recap
@@ -55,6 +58,7 @@ it can become a reusable starter after the real workflow is proven.
 - Saves first, retries failed syncs later, and shows the connection state in Insights
 - Publishes only split, duration, working sets, and broad muscle groups to the fitness page
 - Lets me opt into a small public weight summary without publishing the daily history
+- Includes App Store privacy manifests for health, fitness, app settings, and App Group settings
 
 ## The private data boundary
 
@@ -121,6 +125,7 @@ SwiftUI app shell
     │   ├── TrainingPlanService
     │   ├── WeeklyTrainingBuilder
     │   ├── WeightLogView
+    │   ├── guided run warm-up and cooldown
     │   ├── WorkoutStartFlow
     │   └── WorkoutLogView
     ├── History
@@ -206,14 +211,15 @@ while the installed display name is **Today**.
 
 ## Tests
 
-The 49-test suite covers the original sleep scoring and recap correctness plus Today’s
+The 50+ test suite covers the original sleep scoring and recap correctness plus Today’s
 same-day weight replacement, invalid values, active-workout relaunch, backup recovery,
 two-set workout reset, workout deletion, detailed muscle scoring, prior-value reuse,
 coach-plan lift detection, weekly plan and actual matching, every widget state, widget
-privacy, endpoint allowlisting, payload bounds, and isolation from production sync
-during tests. UI coverage opens the quick weight logger, opens the weekly snapshot,
-closes and resumes an active workout, and verifies that Health Recap remains available
-from Insights.
+privacy, stretch routine state, stretch artwork integrity, endpoint allowlisting,
+payload bounds, and isolation from production sync during tests. UI coverage opens the
+quick weight logger, opens the weekly snapshot, checks the stretch reference and
+optional walkthrough, closes and resumes an active workout, and verifies that Health
+Recap remains available from Insights.
 
 ## Next platform slice
 

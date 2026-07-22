@@ -49,6 +49,34 @@ final class Health_TrackerUITests: XCTestCase {
     }
 
     @MainActor
+    func testStretchRoutineCanBeBrowsedAndGuided() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-useMockData", "true"]
+        app.launch()
+
+        let stretches = app.buttons["stretches-button"]
+        XCTAssertTrue(stretches.waitForExistence(timeout: 5))
+        stretches.tap()
+
+        XCTAssertTrue(app.navigationBars["Run stretches"].waitForExistence(timeout: 2))
+        let firstCard = app.buttons
+            .matching(NSPredicate(format: "label BEGINSWITH %@", "Butt kickers"))
+            .firstMatch
+        XCTAssertTrue(firstCard.waitForExistence(timeout: 2))
+        firstCard.tap()
+        XCTAssertTrue((firstCard.value as? String)?.contains("Expanded") == true)
+
+        let start = app.buttons["start-stretch-routine"]
+        XCTAssertTrue(start.exists)
+        start.tap()
+
+        XCTAssertTrue(app.scrollViews["stretch-session-scroll"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["Butt kickers"].exists)
+        app.buttons["complete-stretch-step"].tap()
+        XCTAssertTrue(app.staticTexts["Frankensteins"].waitForExistence(timeout: 2))
+    }
+
+    @MainActor
     func testActiveWorkoutCanCloseAndResumeWithoutBeingDiscarded() throws {
         let app = XCUIApplication()
         app.launchArguments = ["-useMockData", "true"]

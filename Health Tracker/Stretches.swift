@@ -1,25 +1,30 @@
 import Foundation
 
 /// The two halves of Rohan's run-day mobility routine.
-enum StretchPhase: String, CaseIterable, Identifiable, Codable {
+enum StretchPhase: String, CaseIterable, Identifiable, Codable, Hashable {
     case dynamic
     case cooldown
 
     var id: Self { self }
 
-    /// Long title for the routine screen.
     var title: String {
         switch self {
-        case .dynamic: "Dynamic warm-up"
-        case .cooldown: "Static cool-down"
+        case .dynamic: "Pre-run warm-up"
+        case .cooldown: "Post-run mobility"
         }
     }
 
-    /// Short label for the segmented control.
     var shortTitle: String {
         switch self {
-        case .dynamic: "Dynamic"
-        case .cooldown: "Static"
+        case .dynamic: "Pre-run"
+        case .cooldown: "Post-run"
+        }
+    }
+
+    var actionTitle: String {
+        switch self {
+        case .dynamic: "warm-up"
+        case .cooldown: "cooldown"
         }
     }
 
@@ -30,36 +35,87 @@ enum StretchPhase: String, CaseIterable, Identifiable, Codable {
         }
     }
 
-    /// One line of context shown above the cards.
     var summary: String {
         switch self {
         case .dynamic:
-            "Before your run. Find about 20 yards and work through each one down and back."
+            "For easy runs, the first few easy minutes can be enough. Before workouts or races, jog easy for 5 minutes, then use these drills."
         case .cooldown:
-            "After your run. Ease into each hold and breathe, both sides where it applies."
+            "Walk until your breathing settles. These holds are optional when they help you feel loose or keep your mobility."
         }
+    }
+
+    var safetyNote: String {
+        switch self {
+        case .dynamic:
+            "Stay controlled and use a comfortable range. Skip anything that pinches or hurts."
+        case .cooldown:
+            "Look for gentle tension, not pain. Breathe normally and never bounce or force a position."
+        }
+    }
+
+    var estimatedMinutes: Int {
+        let movementSeconds = StretchLibrary.stretches(for: self)
+            .reduce(0) { $0 + $1.dose.estimatedSeconds }
+        let seconds = movementSeconds + (self == .dynamic ? 300 : 0)
+        return max(1, Int(ceil(Double(seconds) / 60)))
     }
 }
 
-/// How a given stretch is performed, shown as a small hint chip on each card.
-enum StretchStyle: Hashable, CaseIterable {
-    case travel
-    case pole
-    case hold
+/// A concrete amount of work for a movement.
+enum StretchDose: Hashable {
+    case distance(yards: Int, roundTrip: Bool)
+    case repetitions(count: Int, perSide: Bool)
+    case hold(seconds: Int, positions: [String])
 
     var label: String {
         switch self {
-        case .travel: "≈20 yd, down and back"
-        case .pole: "Hold a pole for balance"
-        case .hold: "Hold 20–30 seconds"
+        case .distance(let yards, let roundTrip):
+            return roundTrip ? "About \(yards) yd, down and back" : "About \(yards) yd"
+        case .repetitions(let count, let perSide):
+            return perSide ? "\(count) reps each side" : "\(count) reps"
+        case .hold(let seconds, let positions):
+            if positions.count == 2 {
+                return "\(seconds) sec each side"
+            }
+            if positions.count > 2 {
+                return "\(seconds) sec each position"
+            }
+            return "\(seconds) sec hold"
         }
     }
 
     var symbol: String {
         switch self {
-        case .travel: "arrow.left.and.right"
-        case .pole: "figure.stand"
+        case .distance: "arrow.left.and.right"
+        case .repetitions: "repeat"
         case .hold: "timer"
+        }
+    }
+
+    var estimatedSeconds: Int {
+        switch self {
+        case .distance:
+            35
+        case .repetitions(let count, let perSide):
+            max(20, count * (perSide ? 2 : 1) * 2)
+        case .hold(let seconds, let positions):
+            seconds * max(1, positions.count)
+        }
+    }
+
+    var holdSeconds: Int? {
+        guard case .hold(let seconds, _) = self else { return nil }
+        return seconds
+    }
+
+    var timerSeconds: Int? { holdSeconds }
+
+    var stepPositions: [String?] {
+        switch self {
+        case .distance, .repetitions:
+            [nil]
+        case .hold(_, let positions):
+            positions.isEmpty ? [nil] : positions.map(Optional.some)
         }
     }
 }
@@ -67,187 +123,199 @@ enum StretchStyle: Hashable, CaseIterable {
 struct Stretch: Identifiable, Hashable {
     let id: String
     let name: String
-    /// The short how-to cue shown when the card is opened.
     let cue: String
-    /// Plain-language area the stretch targets.
     let targets: String
-    /// SF Symbol placeholder shown until matching artwork is added.
     let symbol: String
     let phase: StretchPhase
-    let style: StretchStyle
+    let dose: StretchDose
+    let support: String?
 
-    /// Asset-catalog name for the stretch's illustration. When an image with
-    /// this name exists it replaces the placeholder symbol on the card.
     var assetName: String { "stretch-\(id)" }
 }
 
-/// The routine itself. Ordered to match how Rohan actually runs through it.
+struct StretchRoutineStep: Identifiable, Hashable {
+    let stretch: Stretch
+    let position: String?
+    let positionIndex: Int
+
+    var id: String { "\(stretch.id)-\(positionIndex)" }
+}
+
+/// Small, deterministic state machine that keeps the guided routine testable.
+struct StretchRoutineSession: Equatable {
+    let phase: StretchPhase
+    private(set) var stepIndex = 0
+
+    var steps: [StretchRoutineStep] { StretchLibrary.steps(for: phase) }
+    var totalSteps: Int { steps.count }
+    var completedSteps: Int { min(stepIndex, totalSteps) }
+    var isComplete: Bool { stepIndex >= totalSteps }
+    var canGoBack: Bool { stepIndex > 0 }
+    var currentStep: StretchRoutineStep? {
+        guard steps.indices.contains(stepIndex) else { return nil }
+        return steps[stepIndex]
+    }
+
+    var progressLabel: String {
+        isComplete ? "Complete" : "\(stepIndex + 1) of \(totalSteps)"
+    }
+
+    mutating func advance() {
+        stepIndex = min(stepIndex + 1, totalSteps)
+    }
+
+    mutating func goBack() {
+        stepIndex = max(0, stepIndex - 1)
+    }
+
+    mutating func go(to index: Int) {
+        guard totalSteps > 0 else {
+            stepIndex = 0
+            return
+        }
+        stepIndex = min(max(0, index), totalSteps - 1)
+    }
+
+    mutating func restart() {
+        stepIndex = 0
+    }
+}
+
+/// The routine itself, ordered to match how Rohan runs through it.
 enum StretchLibrary {
+    private static let bothSides = ["Right side", "Left side"]
+
     static let dynamic: [Stretch] = [
         Stretch(
             id: "butt-kickers",
             name: "Butt kickers",
-            cue: "Jog forward and flick your heels up toward your glutes with every step.",
-            targets: "Quads and knees",
+            cue: "Jog forward with quick, relaxed steps and bring each heel toward your glutes.",
+            targets: "Quads and running rhythm",
             symbol: "figure.run",
             phase: .dynamic,
-            style: .travel
+            dose: .distance(yards: 20, roundTrip: true),
+            support: nil
         ),
         Stretch(
             id: "frankensteins",
             name: "Frankensteins",
-            cue: "Walk forward kicking one straight leg up to tap the opposite hand, then switch legs.",
+            cue: "Walk tall and lift one straight leg toward the opposite hand. Keep it smooth, stop before your back rounds, and switch legs each step.",
             targets: "Hamstrings",
             symbol: "figure.kickboxing",
             phase: .dynamic,
-            style: .travel
+            dose: .distance(yards: 20, roundTrip: true),
+            support: nil
         ),
         Stretch(
             id: "scoop-toe-touches",
-            name: "Scoop toe touches",
-            cue: "Step forward and scoop both hands down past your toes, then swing tall as you come up.",
-            targets: "Hamstrings and lower back",
+            name: "Hamstring scoops",
+            cue: "Set one heel forward with the toe up, send your hips back, and scoop both hands past the foot with a long spine. Stand tall and switch legs.",
+            targets: "Hamstrings and calves",
             symbol: "figure.flexibility",
             phase: .dynamic,
-            style: .travel
+            dose: .distance(yards: 20, roundTrip: true),
+            support: nil
         ),
         Stretch(
             id: "open-close-gate",
             name: "Open gate, close gate",
-            cue: "One step, lift the knee and rotate it out to open the gate. Next step, rotate it across your body to close it.",
+            cue: "Lift one knee and rotate from the hip. Alternate opening the knee out and bringing it back across your body as you walk.",
             targets: "Hips and groin",
             symbol: "figure.mixed.cardio",
             phase: .dynamic,
-            style: .travel
-        ),
-        Stretch(
-            id: "carioca",
-            name: "Carioca (karaoke)",
-            cue: "Travel sideways crossing one foot over the other and rotating the hips. Do it facing both directions.",
-            targets: "Hips and obliques",
-            symbol: "figure.dance",
-            phase: .dynamic,
-            style: .travel
+            dose: .distance(yards: 20, roundTrip: true),
+            support: nil
         ),
         Stretch(
             id: "walking-lunge-twist",
             name: "Walking lunge with a twist",
-            cue: "Step into a forward lunge and rotate your torso over the front leg, then walk into the next lunge.",
-            targets: "Hip flexors and mid-back",
+            cue: "Step into a comfortable lunge, keep the front knee tracking over your foot, and rotate your torso toward the front leg.",
+            targets: "Hip flexors, glutes, and mid-back",
             symbol: "figure.strengthtraining.functional",
             phase: .dynamic,
-            style: .travel
+            dose: .distance(yards: 20, roundTrip: true),
+            support: nil
         ),
         Stretch(
             id: "lateral-leg-swings",
             name: "Lateral leg swings",
-            cue: "Hold a pole and swing one leg left to right across your body, keeping your torso steady. Switch legs.",
-            targets: "Adductors and abductors",
+            cue: "Swing one leg across your body and out to the side without twisting your torso. Start small and let the range grow naturally.",
+            targets: "Inner and outer hips",
             symbol: "figure.mixed.cardio",
             phase: .dynamic,
-            style: .pole
+            dose: .repetitions(count: 10, perSide: true),
+            support: "Use a wall, pole, or rack for balance."
         ),
         Stretch(
             id: "front-back-leg-swings",
             name: "Front-to-back leg swings",
-            cue: "Hold the pole and swing one leg straight forward and back in a clean line. Switch legs.",
+            cue: "Swing one leg forward and back in a clean line while keeping your torso tall. Start small and stay controlled.",
             targets: "Hamstrings and hip flexors",
             symbol: "figure.walk",
             phase: .dynamic,
-            style: .pole
+            dose: .repetitions(count: 10, perSide: true),
+            support: "Use a wall, pole, or rack for balance."
         ),
     ]
 
     static let cooldown: [Stretch] = [
         Stretch(
             id: "wall-calf",
-            name: "Wall calf stretch",
-            cue: "Right off the pole, lean your hands on the wall, step one foot back with the leg straight and heel pressed down, and sink in for a quick calf stretch. Switch sides.",
-            targets: "Calves",
+            name: "Wall calf stretches",
+            cue: "Keep the back heel down and toes forward. Use a straight back knee for the upper calf, then bend that knee slightly for the lower calf.",
+            targets: "Upper and lower calves",
             symbol: "figure.strengthtraining.functional",
             phase: .cooldown,
-            style: .hold
-        ),
-        Stretch(
-            id: "crossed-toe-touch",
-            name: "Crossed-leg toe touch",
-            cue: "Cross one foot in front of the other, fold forward, and reach for your toes. Swap the cross and repeat.",
-            targets: "Hamstrings and IT band",
-            symbol: "figure.flexibility",
-            phase: .cooldown,
-            style: .hold
-        ),
-        Stretch(
-            id: "wide-toe-touch",
-            name: "Wide-stance toe touches",
-            cue: "Feet wide, reach down toward each foot in turn, then center, to open the inner hamstrings.",
-            targets: "Inner hamstrings and adductors",
-            symbol: "figure.flexibility",
-            phase: .cooldown,
-            style: .hold
-        ),
-        Stretch(
-            id: "crossed-side-bend",
-            name: "Crossed-leg side bend",
-            cue: "Cross one leg over the other and reach up and over to that side. Switch and repeat.",
-            targets: "Hip flexors and outer thigh",
-            symbol: "figure.cooldown",
-            phase: .cooldown,
-            style: .hold
+            dose: .hold(
+                seconds: 30,
+                positions: [
+                    "Right, knee straight",
+                    "Right, knee bent",
+                    "Left, knee straight",
+                    "Left, knee bent",
+                ]
+            ),
+            support: "Use a wall or sturdy rack."
         ),
         Stretch(
             id: "standing-quad",
             name: "Standing quad stretch",
-            cue: "Stand tall, bend one knee and grab that foot behind you, easing the heel toward your glutes like a held butt kicker. Switch sides.",
+            cue: "Stand tall, keep your knees close, and bring one heel toward your glutes without pulling hard or arching your back.",
             targets: "Quads and hip flexors",
             symbol: "figure.yoga",
             phase: .cooldown,
-            style: .hold
+            dose: .hold(seconds: 30, positions: bothSides),
+            support: "Use a wall for balance if you need it."
         ),
         Stretch(
             id: "seated-hamstring",
             name: "Seated hamstring stretch",
-            cue: "Sit with one leg straight and the other tucked in, then reach toward the extended foot. Switch sides.",
+            cue: "Extend one leg, tuck the other foot in, and hinge forward with a long back. Reach only as far as you can stay relaxed.",
             targets: "Hamstrings and calves",
             symbol: "figure.flexibility",
             phase: .cooldown,
-            style: .hold
+            dose: .hold(seconds: 30, positions: bothSides),
+            support: nil
         ),
         Stretch(
             id: "butterfly",
             name: "Butterfly",
-            cue: "Sit with the soles of your feet together and let your knees settle toward the floor.",
-            targets: "Groin and adductors",
+            cue: "Sit tall with the soles of your feet together. Let your knees relax outward without pressing them down.",
+            targets: "Inner thighs and groin",
             symbol: "figure.flexibility",
             phase: .cooldown,
-            style: .hold
-        ),
-        Stretch(
-            id: "seated-twist",
-            name: "Seated spinal twist",
-            cue: "Sit tall, cross one leg over, and twist toward the top knee, arching to open the outer thigh and hip.",
-            targets: "Glutes, outer thigh, hips",
-            symbol: "figure.flexibility",
-            phase: .cooldown,
-            style: .hold
+            dose: .hold(seconds: 30, positions: ["Hold"]),
+            support: nil
         ),
         Stretch(
             id: "pigeon",
             name: "Pigeon stretch",
-            cue: "Lie face down, bring one knee up and forward under your hips, and let your bodyweight settle over that leg while the other stays long behind you. Switch sides.",
-            targets: "Hips, glutes, and quad",
+            cue: "Start on hands and knees, bring one leg forward with the shin at a comfortable angle, and extend the other leg behind you. Keep your hips level and fold only if it feels comfortable.",
+            targets: "Glutes and deep hip rotators",
             symbol: "figure.core.training",
             phase: .cooldown,
-            style: .hold
-        ),
-        Stretch(
-            id: "downward-calf",
-            name: "Down-dog calf stretch",
-            cue: "From a downward-dog or push-up position, rest one foot behind the other ankle and press the bottom heel toward the floor. Switch sides.",
-            targets: "Calves, gastroc and soleus",
-            symbol: "figure.core.training",
-            phase: .cooldown,
-            style: .hold
+            dose: .hold(seconds: 30, positions: bothSides),
+            support: "Use a seated figure four instead if you feel pinching in your hip or knee."
         ),
     ]
 
@@ -257,6 +325,18 @@ enum StretchLibrary {
         switch phase {
         case .dynamic: dynamic
         case .cooldown: cooldown
+        }
+    }
+
+    static func steps(for phase: StretchPhase) -> [StretchRoutineStep] {
+        stretches(for: phase).flatMap { stretch in
+            stretch.dose.stepPositions.enumerated().map { index, position in
+                StretchRoutineStep(
+                    stretch: stretch,
+                    position: position,
+                    positionIndex: index
+                )
+            }
         }
     }
 }

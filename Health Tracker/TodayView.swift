@@ -17,6 +17,9 @@ struct TodayView: View {
         )
     }
     private var todayProgress: WeeklyDaySnapshot? { weeklySnapshot.day(for: .now) }
+    private var suggestedStretchPhase: StretchPhase {
+        todayProgress?.runCompleted == true ? .cooldown : .dynamic
+    }
 
     var body: some View {
         ScrollView {
@@ -99,10 +102,10 @@ struct TodayView: View {
 
     private var stretchesCard: some View {
         Button {
-            appState.presentedSheet = .stretch(phase: .dynamic)
+            appState.presentedSheet = .stretch(phase: suggestedStretchPhase)
         } label: {
             HStack(spacing: 14) {
-                Image(systemName: "figure.flexibility")
+                Image(systemName: suggestedStretchPhase.symbol)
                     .font(.title2)
                     .foregroundStyle(TodayPalette.warm)
                     .frame(width: 44, height: 44)
@@ -111,7 +114,7 @@ struct TodayView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Stretches")
                         .font(.headline)
-                    Text("Dynamic warm-up before · static cool-down after")
+                    Text(suggestedStretchPhase == .cooldown ? "Cool down after today’s run" : "Warm up before your run, cool down after")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
