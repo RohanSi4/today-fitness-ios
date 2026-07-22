@@ -6,6 +6,7 @@ struct ContentView: View {
     @StateObject private var store = TodayStore.shared
     @StateObject private var planService = TrainingPlanService.shared
     @StateObject private var catalog = ExerciseCatalog.shared
+    @StateObject private var coachSync = CoachSyncService.shared
     @ObservedObject private var intentRouter = TodayIntentRouter.shared
 
     var body: some View {
@@ -23,7 +24,12 @@ struct ContentView: View {
             .tag(AppTab.history)
 
             NavigationStack {
-                InsightsView(store: store, catalog: catalog, recapDate: appState.recapDate)
+                InsightsView(
+                    store: store,
+                    catalog: catalog,
+                    coachSync: coachSync,
+                    recapDate: appState.recapDate
+                )
             }
             .tabItem { Label(AppTab.insights.title, systemImage: AppTab.insights.symbol) }
             .tag(AppTab.insights)
@@ -48,6 +54,9 @@ struct ContentView: View {
         }
         .task {
             handleIntentRoute(intentRouter.route)
+            if coachSync.isConnected, coachSync.hasPendingChanges {
+                await store.syncWithCoach()
+            }
         }
         .onOpenURL { url in
             guard url.scheme == "today" else { return }
@@ -58,7 +67,11 @@ struct ContentView: View {
             }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase != .active { store.flushPersistence() }
+            if phase != .active {
+                store.flushPersistence()
+            } else if coachSync.isConnected, coachSync.hasPendingChanges {
+                Task { await store.syncWithCoach() }
+            }
         }
     }
 

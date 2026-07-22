@@ -4,15 +4,18 @@ import SwiftUI
 struct InsightsView: View {
     @ObservedObject var store: TodayStore
     @ObservedObject var catalog: ExerciseCatalog
+    @ObservedObject var coachSync: CoachSyncService
     let recapDate: Date?
 
     @State private var showingRecap = false
+    @State private var showingCoachSync = false
 
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
                 weightProgress
                 weeklyTraining
+                coachConnection
                 recentMuscleWork
                 strengthProgress
 
@@ -45,6 +48,9 @@ struct InsightsView: View {
         .navigationTitle("Insights")
         .sheet(isPresented: $showingRecap) {
             DailyRecapView(targetDate: recapDate)
+        }
+        .sheet(isPresented: $showingCoachSync) {
+            CoachSyncView(service: coachSync, store: store)
         }
     }
 
@@ -109,13 +115,53 @@ struct InsightsView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
-            Text("Private on this device and in Apple Health.")
+            Text("The exact number stays in Today, Apple Health, and the encrypted coach sync.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
         .todayCard()
+    }
+
+    private var coachConnection: some View {
+        Button {
+            showingCoachSync = true
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: coachSync.state.symbol)
+                    .font(.title2)
+                    .foregroundStyle(coachSync.isConnected ? TodayPalette.accent : .secondary)
+                    .frame(width: 40, height: 40)
+                    .background(TodayPalette.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Coach sync").font(.headline)
+                    Text(coachSyncSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if coachSync.state == .syncing {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                }
+            }
+            .padding(16)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .todayCard()
+    }
+
+    private var coachSyncSummary: String {
+        switch coachSync.state {
+        case .notConnected: "Connect Today to the private fitness coach"
+        case .ready: "Changes are waiting to sync"
+        case .syncing: "Sending the latest fitness data"
+        case .synced(let date): "Up to date \(date.formatted(.relative(presentation: .named)))"
+        case .failed: "Saved here and waiting to retry"
+        }
     }
 
     private var weeklyTraining: some View {

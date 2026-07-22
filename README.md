@@ -38,6 +38,10 @@ it can become a reusable starter after the real workflow is proven.
 - Lets a bad workout be removed from History before it affects future defaults
 - Debounces live workout saves, protects the file while the phone is locked, and keeps a last-good backup
 - Preserves the original sleep, movement, and daily recap experience under Insights
+- Encrypts the full weight and lifting snapshot with AES-256-GCM before upload
+- Keeps the phone write token and encryption key in Keychain
+- Saves first, retries failed syncs later, and shows the connection state in Insights
+- Publishes only split, duration, working sets, and broad muscle groups to the fitness page
 
 ## The private data boundary
 
@@ -47,9 +51,9 @@ Public coaching plan
         ▼
       Today app ─────────► Apple Health body weight
         │
-        ├── private lifting history
-        ├── private weight trends
-        └── muscle and strength insights
+        ├── protected local history
+        ├── AES-256-GCM private snapshot ─► website transport ─► coach decrypts
+        └── safe strength summary ────────────────────────────► fitness page
 
 Apple Watch workout ─► Apple Health ─► HealthFit ─► marathon coach
 ```
@@ -58,9 +62,9 @@ Today does not replace or rewrite Apple Watch workouts. The Watch and HealthFit 
 the workout source of truth. Today records the exercise detail that a generic Strength
 Training workout cannot capture.
 
-Exact body weight, exercise choices, sets, reps, and lifting weights do not go to the
-public fitness dashboard. A future public muscle view can use broad weekly muscle
-frequency without exposing the underlying private log.
+Exact body weight, exercise choices, reps, and lifting weights do not go to the public
+fitness dashboard. The public strength view uses split, duration, working-set count,
+and broad muscle frequency without exposing the underlying gym log.
 
 ## Exercise catalog and anatomy
 
@@ -112,6 +116,12 @@ TodayStore
     ├── protected atomic private JSON
     └── last-good local recovery copy
 
+CoachSyncService
+    ├── Keychain pairing credentials
+    ├── local-first retry state
+    ├── AES-256-GCM private snapshot
+    └── smaller public strength projection
+
 HealthKitManager
     ├── read sleep and movement
     ├── write body mass
@@ -139,6 +149,11 @@ The project already uses automatic signing and has Rohan's development team sele
 6. If the phone asks for Developer Mode, open **Settings > Privacy & Security > Developer Mode**, turn it on, restart, confirm it after the restart, then press Run in Xcode again.
 7. On first launch, allow Apple Health access and notifications. Body weight stays private and the workout logger remains separate from the Apple Watch workout record.
 
+To connect the private coach, run `npm run pair:today` from the Marathon Prep Bot
+repo. Add the generated read and write transport tokens to Vercel, then paste the
+one-time connection code into **Insights > Coach sync**. The encryption key is never
+added to the website environment.
+
 After the first wired pairing, Xcode can usually reconnect to the phone on the same network. A free Personal Team install expires after seven days, so press Run again from Xcode when it needs to be refreshed. A paid Apple Developer team avoids that weekly reinstall.
 
 ## Run it in Simulator
@@ -165,5 +180,5 @@ that Health Recap remains available from Insights.
 
 The next slice is a Lock Screen widget backed by the same App Intents. It should show
 whether morning weight is logged and today’s run plus Upper or Lower plan without
-showing the exact weight. Private iCloud export for the coaching repo also waits on the
-app’s permanent signing and iCloud capability setup.
+showing the exact weight. A workout Live Activity can then keep the current exercise
+and completed-set count on the Lock Screen and Dynamic Island.

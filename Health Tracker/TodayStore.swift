@@ -13,10 +13,16 @@ final class TodayStore: ObservableObject {
 
     private let storageURL: URL
     private let calendar: Calendar
+    private let syncService: CoachSyncService
     private var pendingPersistTask: Task<Void, Never>?
 
-    init(storageURL: URL? = nil, calendar: Calendar = .current) {
+    init(
+        storageURL: URL? = nil,
+        calendar: Calendar = .current,
+        syncService: CoachSyncService? = nil
+    ) {
         self.calendar = calendar
+        self.syncService = syncService ?? CoachSyncService.shared
         self.storageURL = storageURL ?? Self.defaultStorageURL
         load()
     }
@@ -57,7 +63,7 @@ final class TodayStore: ObservableObject {
         weights.removeAll { calendar.isDate($0.date, inSameDayAs: day) }
         weights.append(WeightEntry(date: date, pounds: pounds, healthKitID: healthKitID))
         weights.sort { $0.date > $1.date }
-        persist()
+        persist(syncAfterSave: true)
     }
 
     func mergeHealthWeights(_ entries: [WeightEntry]) {
@@ -68,7 +74,7 @@ final class TodayStore: ObservableObject {
             weights.append(entry)
         }
         weights.sort { $0.date > $1.date }
-        persist()
+        persist(syncAfterSave: true)
     }
 
     func beginWorkout(kind: WorkoutKind, catalog: ExerciseCatalog) {
@@ -92,7 +98,7 @@ final class TodayStore: ObservableObject {
         workout.endedAt = Date()
         workouts.insert(workout, at: 0)
         activeWorkout = nil
-        persist()
+        persist(syncAfterSave: true)
         return workout
     }
 
@@ -103,7 +109,7 @@ final class TodayStore: ObservableObject {
 
     func deleteWorkout(id: UUID) {
         workouts.removeAll { $0.id == id }
-        persist()
+        persist(syncAfterSave: true)
     }
 
     func flushPersistence() {
@@ -114,6 +120,19 @@ final class TodayStore: ObservableObject {
 
     func dismissRecoveryMessage() {
         dataRecoveryMessage = nil
+    }
+
+    var syncSnapshot: StoredTodayData {
+        StoredTodayData(
+            weights: weights,
+            workouts: workouts,
+            activeWorkout: activeWorkout,
+            goalWeight: goalWeight
+        )
+    }
+
+    func syncWithCoach() async {
+        await syncService.sync(snapshot: syncSnapshot, catalog: .shared)
     }
 
     func lastPerformance(for exerciseID: String, limit: Int = 3) -> [LoggedExercise] {
@@ -206,7 +225,7 @@ final class TodayStore: ObservableObject {
         }
     }
 
-    private func persist() {
+    private func persist(syncAfterSave: Bool = false) {
         pendingPersistTask?.cancel()
         pendingPersistTask = nil
         let value = StoredTodayData(
@@ -229,6 +248,9 @@ final class TodayStore: ObservableObject {
                 )
             }
             try data.write(to: storageURL, options: [.atomic, .completeFileProtection])
+            if syncAfterSave {
+                syncService.scheduleSync(snapshot: value, catalog: .shared)
+            }
         } catch {
             assertionFailure("Could not persist Today data: \(error)")
         }
