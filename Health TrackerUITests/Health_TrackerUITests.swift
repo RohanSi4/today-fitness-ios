@@ -77,6 +77,41 @@ final class Health_TrackerUITests: XCTestCase {
     }
 
     @MainActor
+    func testPostRunHoldWaitsForPlayAndCanPauseOrOpenRoutineWheel() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-useMockData", "true"]
+        app.launch()
+
+        let stretches = app.buttons["stretches-button"]
+        XCTAssertTrue(stretches.waitForExistence(timeout: 5))
+        stretches.tap()
+
+        let postRun = app.segmentedControls.buttons["Post-run"]
+        XCTAssertTrue(postRun.waitForExistence(timeout: 2))
+        postRun.tap()
+        app.buttons["start-stretch-routine"].tap()
+
+        let timerButton = app.buttons["stretch-timer-button"]
+        XCTAssertTrue(timerButton.waitForExistence(timeout: 2))
+        XCTAssertEqual(timerButton.label, "Start 30-second hold")
+        XCTAssertTrue(app.staticTexts["Ready when you are"].exists)
+
+        timerButton.tap()
+        XCTAssertEqual(timerButton.label, "Pause")
+
+        app.buttons["stretch-step-picker-button"].tap()
+        XCTAssertTrue(app.navigationBars["Routine wheel"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.pickers["stretch-step-picker"].exists)
+        app.buttons["Cancel"].tap()
+        XCTAssertEqual(timerButton.label, "Resume hold")
+
+        timerButton.tap()
+        XCTAssertEqual(timerButton.label, "Pause")
+        timerButton.tap()
+        XCTAssertEqual(timerButton.label, "Resume hold")
+    }
+
+    @MainActor
     func testActiveWorkoutCanCloseAndResumeWithoutBeingDiscarded() throws {
         let app = XCUIApplication()
         app.launchArguments = ["-useMockData", "true"]

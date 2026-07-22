@@ -45,7 +45,7 @@ it can become a reusable starter after the real workflow is proven.
 - Keeps discard in a secondary menu with a confirmation instead of making it the main exit
 - Keeps run stretches as a quick visual reference instead of making every session a checklist
 - Focuses the warm-up on seven marathon-relevant dynamic moves and trims the post-run list to five useful holds
-- Adds an optional hands-free timer with 30-second holds, 5-second switches, pause, back, skip, and a wheel step picker
+- Adds a timer-first post-run flow that waits for play, guides 30-second holds, gives 5 seconds to switch, and supports pause, back, skip, and a routine wheel
 - Searches an offline-cached catalog of more than 700 lifting exercises
 - Lights up a detailed front and back muscle map as sets are completed
 - Keeps the full muscle map tucked away during the workout, then shows it in the recap

@@ -17,11 +17,11 @@ struct StretchRoutineStepView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 StretchProgressHeader(session: session, onChooseStep: onChooseStep)
-                StretchArtwork(stretch: step.stretch, height: 270)
-                StretchInstructionCard(step: step)
+                StretchArtwork(stretch: step.stretch, height: timer.isTimed ? 220 : 270)
 
                 if timer.isTimed {
                     StretchHoldTimerCard(
+                        step: step,
                         timer: timer,
                         reduceMotion: reduceMotion,
                         transitionTitle: transitionTitle,
@@ -35,6 +35,8 @@ struct StretchRoutineStepView: View {
                         action: onPrimaryAction
                     )
                 }
+
+                StretchInstructionCard(step: step, showsPosition: !timer.isTimed)
 
                 StretchSecondaryControls(
                     canGoBack: session.canGoBack,
@@ -72,12 +74,10 @@ private struct StretchProgressHeader: View {
                 HStack {
                     Text(session.progressLabel)
                         .font(.subheadline.weight(.bold))
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.caption2.weight(.bold))
                     Spacer()
-                    Text("\(session.completedSteps) done")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Label("Routine wheel", systemImage: "dial.medium")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(TodayPalette.accent)
                 }
             }
             .buttonStyle(.plain)
@@ -97,10 +97,11 @@ private struct StretchProgressHeader: View {
 
 private struct StretchInstructionCard: View {
     let step: StretchRoutineStep
+    let showsPosition: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if let position = step.position, position != "Hold" {
+            if showsPosition, let position = step.position, position != "Hold" {
                 Text(position)
                     .font(.caption.weight(.bold))
                     .foregroundStyle(TodayPalette.accent)
@@ -136,6 +137,7 @@ private struct StretchInstructionCard: View {
 }
 
 private struct StretchHoldTimerCard: View {
+    let step: StretchRoutineStep
     let timer: StretchTimerState
     let reduceMotion: Bool
     let transitionTitle: String?
@@ -148,17 +150,24 @@ private struct StretchHoldTimerCard: View {
             let seconds = timer.remainingSeconds(at: context.date)
 
             VStack(spacing: 14) {
-                if timer.isTransition {
-                    VStack(spacing: 3) {
-                        Label("Switch position", systemImage: "arrow.triangle.2.circlepath")
-                            .font(.headline)
-                        if let transitionTitle {
-                            Text("Next: \(transitionTitle)")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center)
-                        }
-                    }
+                VStack(spacing: 4) {
+                    Label(statusTitle, systemImage: statusSymbol)
+                        .font(.headline)
+
+                    Text(statusDetail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if !timer.isTransition, let position = step.position, position != "Hold" {
+                    Text(position)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(TodayPalette.accent)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(TodayPalette.accent.opacity(0.12), in: Capsule())
                 }
 
                 StretchHoldTimerDial(
@@ -190,6 +199,7 @@ private struct StretchHoldTimerCard: View {
             }
             .padding(18)
             .todayCard()
+            .accessibilityIdentifier("stretch-hold-timer-card")
             .onChange(of: seconds) { _, newValue in
                 if newValue == 0, timer.isRunning {
                     onTimerFinished()
@@ -200,11 +210,35 @@ private struct StretchHoldTimerCard: View {
 
     private var primaryLabel: String {
         if timer.isRunning { return "Pause" }
-        return timer.hasStarted ? "Resume" : "Start 30-second hold"
+        if timer.isTransition { return "Resume switch" }
+        if timer.hasStarted { return "Resume hold" }
+        return "Start \(timer.totalSeconds ?? 30)-second hold"
     }
 
     private var primarySymbol: String {
         timer.isRunning ? "pause.fill" : "play.fill"
+    }
+
+    private var statusTitle: String {
+        if timer.isTransition { return timer.isRunning ? "Switch position" : "Switch paused" }
+        if timer.isRunning { return "Hold steady" }
+        return timer.hasStarted ? "Hold paused" : "Ready when you are"
+    }
+
+    private var statusSymbol: String {
+        if timer.isTransition { return "arrow.triangle.2.circlepath" }
+        if timer.isRunning { return "timer" }
+        return timer.hasStarted ? "pause.circle" : "play.circle"
+    }
+
+    private var statusDetail: String {
+        if timer.isTransition {
+            let next = transitionTitle.map { " Next: \($0)." } ?? ""
+            return "Take five seconds to move. The next hold starts automatically.\(next)"
+        }
+        if timer.isRunning { return "Breathe normally and keep the stretch gentle." }
+        if timer.hasStarted { return "Resume whenever you are back in position." }
+        return "Get into position, then press play to start the full hold."
     }
 }
 
@@ -265,7 +299,7 @@ struct StretchStepPicker: View {
             .pickerStyle(.wheel)
             .labelsHidden()
             .accessibilityIdentifier("stretch-step-picker")
-            .navigationTitle("Choose a step")
+            .navigationTitle("Routine wheel")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

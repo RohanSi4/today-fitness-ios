@@ -189,8 +189,16 @@ struct GuidedStretchRoutineView: View {
     }
 
     private func presentStepPicker() {
+        pauseTimerIfNeeded()
         pendingStepIndex = min(session.stepIndex, max(0, session.totalSteps - 1))
         isStepPickerPresented = true
+    }
+
+    private func pauseTimerIfNeeded() {
+        guard isTimerRunning else { return }
+        pausedSeconds = timerState.remainingSeconds(at: .now)
+        deadline = nil
+        isTimerRunning = false
     }
 
     private func choosePendingStep() {
