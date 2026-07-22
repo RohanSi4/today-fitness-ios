@@ -7,12 +7,18 @@ struct ContentView: View {
     @StateObject private var planService = TrainingPlanService.shared
     @StateObject private var catalog = ExerciseCatalog.shared
     @StateObject private var coachSync = CoachSyncService.shared
+    @StateObject private var runService = RunningWorkoutService.shared
     @ObservedObject private var intentRouter = TodayIntentRouter.shared
 
     var body: some View {
         TabView(selection: $appState.selectedTab) {
             NavigationStack {
-                TodayView(store: store, planService: planService, catalog: catalog)
+                TodayView(
+                    store: store,
+                    planService: planService,
+                    catalog: catalog,
+                    runService: runService
+                )
             }
             .tabItem { Label(AppTab.today.title, systemImage: AppTab.today.symbol) }
             .tag(AppTab.today)
@@ -28,6 +34,8 @@ struct ContentView: View {
                     store: store,
                     catalog: catalog,
                     coachSync: coachSync,
+                    planService: planService,
+                    runService: runService,
                     recapDate: appState.recapDate
                 )
             }
@@ -54,23 +62,39 @@ struct ContentView: View {
         }
         .task {
             handleIntentRoute(intentRouter.route)
+            await runService.start()
+            publishWidgetSnapshot()
             if coachSync.isConnected, coachSync.hasPendingChanges {
                 await store.syncWithCoach()
             }
         }
+        .onChange(of: store.weights) { _, _ in publishWidgetSnapshot() }
+        .onChange(of: store.workouts) { _, _ in publishWidgetSnapshot() }
+        .onChange(of: planService.plan) { _, _ in publishWidgetSnapshot() }
+        .onChange(of: runService.workouts) { _, _ in publishWidgetSnapshot() }
         .onOpenURL { url in
             guard url.scheme == "today" else { return }
             switch url.host {
             case "weight": appState.openWeightLogger()
             case "workout": appState.openWorkout()
+            case "history": appState.selectedTab = .history
+            case "week": appState.selectedTab = .insights
             default: appState.selectedTab = .today
             }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active {
                 store.flushPersistence()
-            } else if coachSync.isConnected, coachSync.hasPendingChanges {
-                Task { await store.syncWithCoach() }
+            } else {
+                Task {
+                    async let runs: Void = runService.refresh()
+                    async let plan: Void = planService.refresh()
+                    _ = await (runs, plan)
+                    publishWidgetSnapshot()
+                    if coachSync.isConnected, coachSync.hasPendingChanges {
+                        await store.syncWithCoach()
+                    }
+                }
             }
         }
     }
@@ -86,6 +110,14 @@ struct ContentView: View {
             appState.selectedTab = .today
         }
         intentRouter.consume()
+    }
+
+    private func publishWidgetSnapshot() {
+        TodayWidgetPublisher.publish(
+            store: store,
+            plan: planService.plan,
+            runs: runService.workouts
+        )
     }
 }
 

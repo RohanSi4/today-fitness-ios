@@ -6,6 +6,8 @@ struct InsightsView: View {
     @ObservedObject var store: TodayStore
     @ObservedObject var catalog: ExerciseCatalog
     @ObservedObject var coachSync: CoachSyncService
+    @ObservedObject var planService: TrainingPlanService
+    @ObservedObject var runService: RunningWorkoutService
     let recapDate: Date?
 
     @State private var showingRecap = false
@@ -182,31 +184,22 @@ struct InsightsView: View {
     }
 
     private var weeklyTraining: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Label("Training this week", systemImage: "calendar")
-                    .font(.headline)
-                Spacer()
-                Text("Last 7 days")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            HStack(spacing: 10) {
-                metric(value: weeklyWorkouts.count, label: "workouts")
-                metric(value: weeklySetCount, label: "working sets")
-                metric(value: weeklyMuscleCount, label: "areas hit")
-            }
-
-            if weeklyWorkouts.isEmpty {
-                Text("Your next finished workout will start the week.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
+        NavigationLink {
+            WeeklySnapshotView(
+                store: store,
+                planService: planService,
+                runService: runService
+            )
+        } label: {
+            WeeklySnapshotCard(
+                snapshot: WeeklyTrainingBuilder.build(
+                    plan: planService.plan,
+                    runs: runService.workouts,
+                    lifts: store.workouts
+                )
+            )
         }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .todayCard()
+        .buttonStyle(.plain)
     }
 
     private var recentMuscleWork: some View {

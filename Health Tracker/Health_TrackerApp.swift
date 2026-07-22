@@ -21,6 +21,17 @@ struct Health_TrackerApp: App {
         HealthKitManager.shared.startSleepWakeMonitoring { wakeTime in
             NotificationManager.shared.scheduleWeightReminderAfterWake(wakeTime)
         }
+        HealthKitManager.shared.startWorkoutMonitoring {
+            Task { @MainActor in
+                let runs = RunningWorkoutService.shared
+                await runs.refresh()
+                TodayWidgetPublisher.publish(
+                    store: TodayStore.shared,
+                    plan: TrainingPlanService.shared.plan,
+                    runs: runs.workouts
+                )
+            }
+        }
     }
 
     var body: some Scene {

@@ -39,7 +39,7 @@ protocol BodyWeightHealthStoring {
     func fetchBodyWeights(start: Date, end: Date) async throws -> [WeightEntry]
 }
 
-final class HealthKitManager: HealthDataProviding, BodyWeightHealthStoring {
+final class HealthKitManager: HealthDataProviding, BodyWeightHealthStoring, RunningWorkoutProviding {
     static let shared = HealthKitManager()
 
     var isHealthDataAvailable: Bool {
@@ -49,6 +49,7 @@ final class HealthKitManager: HealthDataProviding, BodyWeightHealthStoring {
     private let store: HKHealthStore
     private let sessionAssembler = SleepSessionAssembler()
     private var sleepObserverQuery: HKObserverQuery?
+    private var workoutObserverQuery: HKObserverQuery?
 
     private init(store: HKHealthStore = HKHealthStore()) {
         self.store = store
@@ -66,7 +67,13 @@ final class HealthKitManager: HealthDataProviding, BodyWeightHealthStoring {
             throw HealthKitError.unsupportedType
         }
 
-        let readTypes: Set<HKObjectType> = [sleepType, stepsType, distanceType, energyType]
+        let readTypes: Set<HKObjectType> = [
+            sleepType,
+            stepsType,
+            distanceType,
+            energyType,
+            HKWorkoutType.workoutType(),
+        ]
 
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             store.requestAuthorization(toShare: [], read: readTypes) { success, error in
@@ -100,6 +107,17 @@ final class HealthKitManager: HealthDataProviding, BodyWeightHealthStoring {
                 }
             }
         }
+    }
+
+    func requestWorkoutAuthorization() async throws {
+        guard isHealthDataAvailable else {
+            throw HealthKitError.healthDataNotAvailable
+        }
+        try await requestAuthorization(toShare: [], read: [HKWorkoutType.workoutType()])
+        try await store.enableBackgroundDelivery(
+            for: HKWorkoutType.workoutType(),
+            frequency: .immediate
+        )
     }
 
     func saveBodyWeight(pounds: Double, date: Date) async throws -> UUID {
@@ -155,6 +173,48 @@ final class HealthKitManager: HealthDataProviding, BodyWeightHealthStoring {
         }
     }
 
+    func fetchRunningWorkouts(start: Date, end: Date) async throws -> [RunningWorkoutSummary] {
+        let samplePredicate = HKQuery.predicateForSamples(
+            withStart: start,
+            end: end,
+            options: [.strictStartDate]
+        )
+        let runningPredicate = HKQuery.predicateForWorkouts(with: .running)
+        let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+            samplePredicate,
+            runningPredicate,
+        ])
+        let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)
+
+        let workouts: [HKWorkout] = try await withCheckedThrowingContinuation { continuation in
+            let query = HKSampleQuery(
+                sampleType: HKWorkoutType.workoutType(),
+                predicate: predicate,
+                limit: HKObjectQueryNoLimit,
+                sortDescriptors: [sort]
+            ) { _, results, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: (results as? [HKWorkout]) ?? [])
+                }
+            }
+            store.execute(query)
+        }
+
+        return workouts.compactMap { workout in
+            let miles = workout.totalDistance?.doubleValue(for: .mile()) ?? 0
+            guard workout.duration > 0, miles > 0 else { return nil }
+            return RunningWorkoutSummary(
+                id: workout.uuid,
+                startedAt: workout.startDate,
+                endedAt: workout.endDate,
+                miles: miles,
+                duration: workout.duration
+            )
+        }
+    }
+
     func startSleepWakeMonitoring(onWake: @escaping @Sendable (Date) -> Void) {
         guard sleepObserverQuery == nil,
               let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) else {
@@ -184,6 +244,19 @@ final class HealthKitManager: HealthDataProviding, BodyWeightHealthStoring {
         sleepObserverQuery = query
         store.execute(query)
         store.enableBackgroundDelivery(for: sleepType, frequency: .immediate) { _, _ in }
+    }
+
+    func startWorkoutMonitoring(onChange: @escaping @Sendable () -> Void) {
+        guard workoutObserverQuery == nil else { return }
+        let workoutType = HKWorkoutType.workoutType()
+        let query = HKObserverQuery(sampleType: workoutType, predicate: nil) { _, completion, error in
+            defer { completion() }
+            guard error == nil else { return }
+            onChange()
+        }
+        workoutObserverQuery = query
+        store.execute(query)
+        store.enableBackgroundDelivery(for: workoutType, frequency: .immediate) { _, _ in }
     }
 
     func fetchSleepSessions(start: Date, end: Date) async throws -> [SleepSession] {
@@ -269,6 +342,23 @@ final class HealthKitManager: HealthDataProviding, BodyWeightHealthStoring {
         case .steps: .count()
         case .distance: .meter()
         case .activeEnergy: .kilocalorie()
+        }
+    }
+
+    private func requestAuthorization(
+        toShare shareTypes: Set<HKSampleType>,
+        read readTypes: Set<HKObjectType>
+    ) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            store.requestAuthorization(toShare: shareTypes, read: readTypes) { success, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if success {
+                    continuation.resume(returning: ())
+                } else {
+                    continuation.resume(throwing: HealthKitError.authorizationDenied)
+                }
+            }
         }
     }
 }

@@ -14,6 +14,14 @@ it can become a reusable starter after the real workflow is proven.
 
 - Pulls the current privacy-safe run and Upper or Lower plan from
   `rohansingh04.com`
+- Matches planned runs against completed Apple Health workouts and shows distance,
+  duration, and pace
+- Shows the full week in Run and Lift + other columns with plan versus actual status
+- Keeps a compact weekly snapshot on Today and a more useful detailed view one tap away
+- Adds a Lock Screen widget that moves from morning weight, to today’s work, to what is
+  left, to done with workout stats
+- Refreshes the widget when weight, lifting, the coach plan, or a synced Apple Watch run changes
+- Shares only a small derived widget snapshot through an App Group, never exact weight or exercise detail
 - Opens directly to a five-second morning weight logger
 - Saves body weight to Apple Health and mirrors it in a private local history
 - Schedules an 8:30 AM reminder and a noon fallback when weight is still missing
@@ -109,6 +117,7 @@ workout scoring, labels, and native SwiftUI interaction.
 SwiftUI app shell
     ├── Today
     │   ├── TrainingPlanService
+    │   ├── WeeklyTrainingBuilder
     │   ├── WeightLogView
     │   ├── WorkoutStartFlow
     │   └── WorkoutLogView
@@ -132,8 +141,15 @@ CoachSyncService
 
 HealthKitManager
     ├── read sleep and movement
+    ├── read completed running workouts
     ├── write body mass
-    └── observe completed sleep sessions
+    └── observe completed sleep and workout changes
+
+TodayWidget
+    ├── Lock Screen inline and rectangular layouts
+    ├── Home Screen small layout
+    ├── app-triggered WidgetKit refreshes
+    └── privacy-safe App Group snapshot
 
 NotificationManager
     ├── wake-aware prompt
@@ -162,6 +178,11 @@ The project already uses automatic signing and has Rohan's development team sele
 6. If the phone asks for Developer Mode, open **Settings > Privacy & Security > Developer Mode**, turn it on, restart, confirm it after the restart, then press Run in Xcode again.
 7. On first launch, allow Apple Health access and notifications. Public weight sharing starts off and the workout logger remains separate from the Apple Watch workout record.
 
+To add the daily widget, hold the iPhone Lock Screen, tap **Customize**, choose
+**Lock Screen**, tap the widget area below the clock, and add **Today**. The rectangular
+version shows the most context. The inline version fits above the clock, and the small
+version is also available on the Home Screen.
+
 To connect the private coach, run `npm run pair:today` from the Marathon Prep Bot
 repo. Add the generated read and write transport tokens to Vercel, then paste the
 pairing code into **Insights > Coach sync**. The encryption key is never
@@ -183,12 +204,13 @@ while the installed display name is **Today**.
 
 ## Tests
 
-The 38-test suite covers the original sleep scoring and recap correctness plus Today’s
+The 42-test suite covers the original sleep scoring and recap correctness plus Today’s
 same-day weight replacement, invalid values, active-workout relaunch, backup recovery,
 two-set workout reset, workout deletion, detailed muscle scoring, prior-value reuse,
-coach-plan lift detection, endpoint allowlisting, payload bounds, and isolation from
-production sync during tests. UI coverage opens the quick weight logger and verifies
-that Health Recap remains available from Insights.
+coach-plan lift detection, weekly plan and actual matching, every widget state, widget
+privacy, endpoint allowlisting, payload bounds, and isolation from production sync
+during tests. UI coverage opens the quick weight logger, opens the weekly snapshot, and
+verifies that Health Recap remains available from Insights.
 
 ## Next platform slice
 
@@ -197,10 +219,11 @@ distance goal in Apple Workout through WorkoutKit. For lifting, I still start Ap
 Strength Training workout and use Today on the phone for sets. A separate Watch workout
 session would duplicate ownership and create bad HealthKit edge cases.
 
-The next justified Watch slice is a read-only Smart Stack widget for today’s run and
-Upper or Lower plan. It should appear only when the wrist glance proves more useful than
-the existing plan shortcut. On iPhone, a Lock Screen widget and workout Live Activity
-can reuse the same App Intents without changing who owns the workout record.
+The iPhone Lock Screen widget now covers the daily glance without starting another live
+workout session. The next justified Watch slice is a read-only Smart Stack widget for
+today’s run and Upper or Lower plan. It should appear only when the wrist glance proves
+more useful than the existing plan shortcut. A workout Live Activity remains optional
+because Apple Watch still owns workout recording.
 
 ## Future food tracking
 

@@ -6,7 +6,18 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		A10000000000000000000009 /* TodayWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A10000000000000000000001 /* TodayWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
+		A1000000000000000000000A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B4033C5B2E022E9400AAF3E9 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A10000000000000000000004;
+			remoteInfo = TodayWidget;
+		};
 		B4033C712E022E9500AAF3E9 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = B4033C5B2E022E9400AAF3E9 /* Project object */;
@@ -23,13 +34,38 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		A10000000000000000000008 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				A10000000000000000000009 /* TodayWidget.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		A10000000000000000000001 /* TodayWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = TodayWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		B4033C632E022E9400AAF3E9 /* Health Tracker.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Health Tracker.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		B4033C702E022E9500AAF3E9 /* Health TrackerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Health TrackerTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		B4033C7A2E022E9500AAF3E9 /* Health TrackerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Health TrackerUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		A10000000000000000000002 /* TodayWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = TodayWidget;
+			sourceTree = "<group>";
+		};
+		A10000000000000000000003 /* TodayWidgetShared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = TodayWidgetShared;
+			sourceTree = "<group>";
+		};
 		B4033C652E022E9400AAF3E9 /* Health Tracker */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = "Health Tracker";
@@ -48,6 +84,13 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		A10000000000000000000006 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		B4033C602E022E9400AAF3E9 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -76,6 +119,8 @@
 			isa = PBXGroup;
 			children = (
 				B4033C652E022E9400AAF3E9 /* Health Tracker */,
+				A10000000000000000000002 /* TodayWidget */,
+				A10000000000000000000003 /* TodayWidgetShared */,
 				B4033C732E022E9500AAF3E9 /* Health TrackerTests */,
 				B4033C7D2E022E9500AAF3E9 /* Health TrackerUITests */,
 				B4033C642E022E9400AAF3E9 /* Products */,
@@ -86,6 +131,7 @@
 			isa = PBXGroup;
 			children = (
 				B4033C632E022E9400AAF3E9 /* Health Tracker.app */,
+				A10000000000000000000001 /* TodayWidget.appex */,
 				B4033C702E022E9500AAF3E9 /* Health TrackerTests.xctest */,
 				B4033C7A2E022E9500AAF3E9 /* Health TrackerUITests.xctest */,
 			);
@@ -95,6 +141,29 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		A10000000000000000000004 /* TodayWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1000000000000000000000C /* Build configuration list for PBXNativeTarget "TodayWidget" */;
+			buildPhases = (
+				A10000000000000000000005 /* Sources */,
+				A10000000000000000000006 /* Frameworks */,
+				A10000000000000000000007 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A10000000000000000000002 /* TodayWidget */,
+				A10000000000000000000003 /* TodayWidgetShared */,
+			);
+			name = TodayWidget;
+			packageProductDependencies = (
+			);
+			productName = TodayWidget;
+			productReference = A10000000000000000000001 /* TodayWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		B4033C622E022E9400AAF3E9 /* Health Tracker */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = B4033C842E022E9600AAF3E9 /* Build configuration list for PBXNativeTarget "Health Tracker" */;
@@ -102,13 +171,16 @@
 				B4033C5F2E022E9400AAF3E9 /* Sources */,
 				B4033C602E022E9400AAF3E9 /* Frameworks */,
 				B4033C612E022E9400AAF3E9 /* Resources */,
+				A10000000000000000000008 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				A1000000000000000000000B /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				B4033C652E022E9400AAF3E9 /* Health Tracker */,
+				A10000000000000000000003 /* TodayWidgetShared */,
 			);
 			name = "Health Tracker";
 			packageProductDependencies = (
@@ -173,6 +245,9 @@
 				LastSwiftUpdateCheck = 1640;
 				LastUpgradeCheck = 1640;
 				TargetAttributes = {
+					A10000000000000000000004 = {
+						CreatedOnToolsVersion = 26.0;
+					};
 					B4033C622E022E9400AAF3E9 = {
 						CreatedOnToolsVersion = 16.4;
 					};
@@ -201,6 +276,7 @@
 			projectRoot = "";
 			targets = (
 				B4033C622E022E9400AAF3E9 /* Health Tracker */,
+				A10000000000000000000004 /* TodayWidget */,
 				B4033C6F2E022E9500AAF3E9 /* Health TrackerTests */,
 				B4033C792E022E9500AAF3E9 /* Health TrackerUITests */,
 			);
@@ -208,6 +284,13 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		A10000000000000000000007 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		B4033C612E022E9400AAF3E9 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -232,6 +315,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		A10000000000000000000005 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		B4033C5F2E022E9400AAF3E9 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -256,6 +346,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		A1000000000000000000000B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A10000000000000000000004 /* TodayWidget */;
+			targetProxy = A1000000000000000000000A /* PBXContainerItemProxy */;
+		};
 		B4033C722E022E9500AAF3E9 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = B4033C622E022E9400AAF3E9 /* Health Tracker */;
@@ -269,6 +364,58 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		A1000000000000000000000D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = TodayWidget/TodayWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 46Q2G4XNBY;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "TodayWidget-Info.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "rohansingh.Health-Tracker.TodayWidget";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A1000000000000000000000E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = TodayWidget/TodayWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 46Q2G4XNBY;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "TodayWidget-Info.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "rohansingh.Health-Tracker.TodayWidget";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		B4033C822E022E9600AAF3E9 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -527,6 +674,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		A1000000000000000000000C /* Build configuration list for PBXNativeTarget "TodayWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1000000000000000000000D /* Debug */,
+				A1000000000000000000000E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		B4033C5E2E022E9400AAF3E9 /* Build configuration list for PBXProject "Health Tracker" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

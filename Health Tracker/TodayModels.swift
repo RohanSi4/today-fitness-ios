@@ -265,7 +265,7 @@ struct DashboardEnvelope: Codable {
     let trainingPlan: TrainingPlan?
 }
 
-struct TrainingPlan: Codable {
+struct TrainingPlan: Codable, Equatable {
     let weekStart: String
     let weekEnd: String
     let prescribedMiles: Double
@@ -288,8 +288,20 @@ struct TrainingPlanDay: Codable, Identifiable, Hashable {
     }
 
     var hasRun: Bool {
-        text.localizedCaseInsensitiveContains("mile run") ||
-        text.localizedCaseInsensitiveContains("mile long run")
+        plannedRunMiles != nil
+    }
+
+    var plannedRunMiles: Double? {
+        let pattern = #"(?i)\b(\d{1,2}(?:\.\d{1,2})?)\s*(?:mile|miles|mi)\b"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(
+                in: text,
+                range: NSRange(text.startIndex..., in: text)
+              ),
+              let range = Range(match.range(at: 1), in: text) else {
+            return nil
+        }
+        return Double(text[range])
     }
 
     var isRestOnly: Bool {

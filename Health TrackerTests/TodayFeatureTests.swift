@@ -346,6 +346,228 @@ struct TrainingPlanModelTests {
 }
 
 @MainActor
+struct WeeklyTrainingSnapshotTests {
+    @Test func weeklySnapshotCombinesPlanRunsAndLifts() throws {
+        let calendar = utcCalendar
+        let now = try #require(date("2026-07-22T12:00:00Z"))
+        let runStart = try #require(date("2026-07-22T08:00:00Z"))
+        let plan = samplePlan(todayText: "5 mile run + upper body lift")
+        let run = RunningWorkoutSummary(
+            id: UUID(),
+            startedAt: runStart,
+            endedAt: runStart.addingTimeInterval(2_400),
+            miles: 5.1,
+            duration: 2_400
+        )
+        let lift = WorkoutSession(
+            kind: .upper,
+            startedAt: runStart.addingTimeInterval(4_000),
+            endedAt: runStart.addingTimeInterval(6_000),
+            exercises: [
+                LoggedExercise(
+                    exerciseID: "machine-chest-fly",
+                    sets: [
+                        LoggedSet(weight: 235, reps: 5, isComplete: true),
+                        LoggedSet(weight: 235, reps: 4, isComplete: true),
+                    ]
+                ),
+            ]
+        )
+
+        let snapshot = WeeklyTrainingBuilder.build(
+            plan: plan,
+            runs: [run],
+            lifts: [lift],
+            now: now,
+            calendar: calendar
+        )
+        let today = try #require(snapshot.day(for: now, calendar: calendar))
+
+        #expect(today.runCompleted)
+        #expect(today.liftCompleted)
+        #expect(today.isFullyComplete)
+        #expect(snapshot.completedMiles == 5.1)
+        #expect(snapshot.completedRuns == 1)
+        #expect(snapshot.completedLifts == 1)
+        #expect(snapshot.workingSets == 2)
+    }
+
+    @Test func widgetPrioritizesWeightThenShowsRemainingWorkThenCompletion() throws {
+        let calendar = utcCalendar
+        let now = try #require(date("2026-07-22T12:00:00Z"))
+        let plan = samplePlan(todayText: "5 mile run + lower body lift")
+        let emptyWeek = WeeklyTrainingBuilder.build(
+            plan: plan,
+            runs: [],
+            lifts: [],
+            now: now,
+            calendar: calendar
+        )
+        let emptyDay = try #require(emptyWeek.day(for: now, calendar: calendar))
+
+        let weightState = TodayWidgetPublisher.makeSnapshot(
+            weightLogged: false,
+            day: emptyDay,
+            week: emptyWeek,
+            now: now,
+            calendar: calendar
+        )
+        #expect(weightState.phase == .weight)
+        #expect(weightState.headline == "Log morning weight")
+        #expect(weightState.deepLink.host == "weight")
+
+        let planState = TodayWidgetPublisher.makeSnapshot(
+            weightLogged: true,
+            day: emptyDay,
+            week: emptyWeek,
+            now: now,
+            calendar: calendar
+        )
+        #expect(planState.phase == .plan)
+        #expect(planState.headline == "5 mi run + Lower lift")
+
+        let runStart = try #require(date("2026-07-22T08:00:00Z"))
+        let run = RunningWorkoutSummary(
+            id: UUID(),
+            startedAt: runStart,
+            endedAt: runStart.addingTimeInterval(2_400),
+            miles: 5,
+            duration: 2_400
+        )
+        let runWeek = WeeklyTrainingBuilder.build(
+            plan: plan,
+            runs: [run],
+            lifts: [],
+            now: now,
+            calendar: calendar
+        )
+        let runDay = try #require(runWeek.day(for: now, calendar: calendar))
+        let remainingState = TodayWidgetPublisher.makeSnapshot(
+            weightLogged: true,
+            day: runDay,
+            week: runWeek,
+            now: now,
+            calendar: calendar
+        )
+        #expect(remainingState.phase == .remaining)
+        #expect(remainingState.headline == "Lower lift")
+        #expect(remainingState.detail.contains("5 mi in 40m"))
+        #expect(remainingState.deepLink.host == "workout")
+
+        let lift = WorkoutSession(
+            kind: .lower,
+            startedAt: runStart.addingTimeInterval(4_000),
+            endedAt: runStart.addingTimeInterval(5_000),
+            exercises: [
+                LoggedExercise(
+                    exerciseID: "leg-extension",
+                    sets: [LoggedSet(weight: 100, reps: 10, isComplete: true)]
+                ),
+            ]
+        )
+        let doneWeek = WeeklyTrainingBuilder.build(
+            plan: plan,
+            runs: [run],
+            lifts: [lift],
+            now: now,
+            calendar: calendar
+        )
+        let doneDay = try #require(doneWeek.day(for: now, calendar: calendar))
+        let doneState = TodayWidgetPublisher.makeSnapshot(
+            weightLogged: true,
+            day: doneDay,
+            week: doneWeek,
+            now: now,
+            calendar: calendar
+        )
+        #expect(doneState.phase == .done)
+        #expect(doneState.headline == "Done for the day")
+        #expect(doneState.detail == "5 mi in 40m · 1 set")
+        #expect(doneState.deepLink.host == "history")
+    }
+
+    @Test func widgetPayloadCannotContainExactWeightOrExerciseDetails() throws {
+        let snapshot = TodayWidgetSnapshot.placeholder
+        let encoded = try JSONEncoder().encode(snapshot)
+        let json = try #require(String(data: encoded, encoding: .utf8))
+
+        #expect(!json.contains("184.4"))
+        #expect(!json.contains("machine-chest-fly"))
+        #expect(!json.contains("exercise"))
+        #expect(!json.contains("pounds"))
+    }
+
+    private func samplePlan(todayText: String) -> TrainingPlan {
+        TrainingPlan(
+            weekStart: "2026-07-20",
+            weekEnd: "2026-07-26",
+            prescribedMiles: 35,
+            days: [
+                TrainingPlanDay(
+                    date: "2026-07-20",
+                    dayLabel: "Mon 7/20",
+                    text: "Rest",
+                    isKeyDay: false,
+                    details: []
+                ),
+                TrainingPlanDay(
+                    date: "2026-07-21",
+                    dayLabel: "Tue 7/21",
+                    text: "4 mile run + upper body lift",
+                    isKeyDay: false,
+                    details: []
+                ),
+                TrainingPlanDay(
+                    date: "2026-07-22",
+                    dayLabel: "Wed 7/22",
+                    text: todayText,
+                    isKeyDay: true,
+                    details: []
+                ),
+                TrainingPlanDay(
+                    date: "2026-07-23",
+                    dayLabel: "Thu 7/23",
+                    text: "Rest",
+                    isKeyDay: false,
+                    details: []
+                ),
+                TrainingPlanDay(
+                    date: "2026-07-24",
+                    dayLabel: "Fri 7/24",
+                    text: "6 mile run + lower body lift",
+                    isKeyDay: false,
+                    details: []
+                ),
+                TrainingPlanDay(
+                    date: "2026-07-25",
+                    dayLabel: "Sat 7/25",
+                    text: "12 mile long run",
+                    isKeyDay: true,
+                    details: []
+                ),
+                TrainingPlanDay(
+                    date: "2026-07-26",
+                    dayLabel: "Sun 7/26",
+                    text: "Rest",
+                    isKeyDay: false,
+                    details: []
+                ),
+            ]
+        )
+    }
+
+    private func date(_ value: String) -> Date? {
+        ISO8601DateFormatter().date(from: value)
+    }
+
+    private var utcCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return calendar
+    }
+}
+
+@MainActor
 private final class CoachSyncSpy: CoachSyncing {
     private(set) var scheduledSnapshots: [StoredTodayData] = []
 

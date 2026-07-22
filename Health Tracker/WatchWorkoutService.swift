@@ -31,7 +31,7 @@ final class WatchWorkoutService: ObservableObject {
     var isSupported: Bool { supported() }
 
     func send(_ day: TrainingPlanDay) async {
-        guard let miles = Self.runMiles(from: day.text), (0.1...100).contains(miles) else {
+        guard let miles = day.plannedRunMiles, (0.1...100).contains(miles) else {
             state = .failed("Today could not find a safe distance goal in this run.")
             return
         }
@@ -87,16 +87,13 @@ final class WatchWorkoutService: ObservableObject {
     }
 
     static func runMiles(from text: String) -> Double? {
-        let pattern = #"(?i)\b(\d{1,2}(?:\.\d{1,2})?)\s*(?:mile|miles|mi)\b"#
-        guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(
-                in: text,
-                range: NSRange(text.startIndex..., in: text)
-              ),
-              let range = Range(match.range(at: 1), in: text) else {
-            return nil
-        }
-        return Double(text[range])
+        TrainingPlanDay(
+            date: "2000-01-01",
+            dayLabel: "",
+            text: text,
+            isKeyDay: false,
+            details: []
+        ).plannedRunMiles
     }
 
     static func location(from text: String) -> HKWorkoutSessionLocationType {

@@ -34,4 +34,17 @@ final class Health_TrackerUITests: XCTestCase {
         recap.swipeUp()
         XCTAssertTrue(app.staticTexts["Movement"].waitForExistence(timeout: 2))
     }
+
+    @MainActor
+    func testWeeklySnapshotOpensFromToday() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-useMockData", "true"]
+        app.launch()
+
+        let card = app.buttons["weekly-snapshot-card"]
+        XCTAssertTrue(card.waitForExistence(timeout: 5))
+        card.tap()
+        XCTAssertTrue(app.navigationBars["This week"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.descendants(matching: .any)["weekly-snapshot-table"].exists)
+    }
 }
