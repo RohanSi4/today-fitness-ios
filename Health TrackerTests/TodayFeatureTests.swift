@@ -78,6 +78,20 @@ struct TodayStoreTests {
         #expect(importedCurl.contains { $0.muscle == .forearms && $0.intensity == 0.45 })
     }
 
+    @Test func calfRaisesLightBothCalfRegions() throws {
+        let store = TodayStore(storageURL: temporaryURL("calf-map"))
+        let catalog = ExerciseCatalog(cacheURL: temporaryURL("calf-catalog"))
+        let completed = LoggedExercise(
+            exerciseID: "calf-raise",
+            sets: [LoggedSet(weight: 100, reps: 12, isComplete: true)]
+        )
+        let workout = WorkoutSession(kind: .lower, startedAt: .now, endedAt: nil, exercises: [completed])
+        let scores = store.muscleScores(for: workout, catalog: catalog)
+
+        #expect(scores[.gastrocnemius] == 1)
+        #expect(scores[.soleus] == 0.75)
+    }
+
     @Test func setsCanBeAddedAndRemovedWithoutDroppingCompletedWorkFirst() {
         let completed = LoggedSet(weight: 235, reps: 5, isComplete: true)
         let planned = LoggedSet(weight: 235, reps: 5, isComplete: false)
