@@ -33,7 +33,9 @@ struct WorkoutLogView: View {
                 workoutEditor
             }
         }
-        .interactiveDismissDisabled(completedSession == nil)
+        .onDisappear {
+            persistActiveWorkoutIfNeeded()
+        }
     }
 
     private var workoutEditor: some View {
@@ -103,14 +105,27 @@ struct WorkoutLogView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Discard", role: .destructive) {
-                        showDiscardConfirmation = true
+                    Button("Close") {
+                        persistActiveWorkoutIfNeeded()
+                        dismiss()
                     }
+                    .accessibilityIdentifier("close-workout-button")
                 }
-                ToolbarItem(placement: .confirmationAction) {
+                ToolbarItemGroup(placement: .confirmationAction) {
                     Text("\(draft.completedSetCount) sets")
                         .font(.subheadline.monospacedDigit())
                         .foregroundStyle(.secondary)
+                    Menu {
+                        Button(role: .destructive) {
+                            showDiscardConfirmation = true
+                        } label: {
+                            Label("Discard workout", systemImage: "trash")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .accessibilityLabel("Workout options")
+                    .accessibilityIdentifier("workout-options-menu")
                 }
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
@@ -229,6 +244,12 @@ struct WorkoutLogView: View {
         return draft.exercises.dropFirst(index + 1).first(where: { logged in
             logged.sets.contains { !$0.isPerformed }
         })?.id
+    }
+
+    private func persistActiveWorkoutIfNeeded() {
+        guard completedSession == nil, store.activeWorkout != nil else { return }
+        store.updateActiveWorkout(draft)
+        store.flushPersistence()
     }
 
     private var watchReminder: some View {

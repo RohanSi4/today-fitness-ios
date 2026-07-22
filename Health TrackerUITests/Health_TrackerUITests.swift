@@ -47,4 +47,32 @@ final class Health_TrackerUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["This week"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.descendants(matching: .any)["weekly-snapshot-table"].exists)
     }
+
+    @MainActor
+    func testActiveWorkoutCanCloseAndResumeWithoutBeingDiscarded() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-useMockData", "true"]
+        app.launch()
+
+        let resume = app.buttons["resume-workout-button"]
+        if resume.waitForExistence(timeout: 2) {
+            resume.tap()
+        } else {
+            let start = app.buttons["start-workout-button"]
+            XCTAssertTrue(start.waitForExistence(timeout: 5))
+            start.tap()
+            let upper = app.buttons["start-upper-workout"]
+            XCTAssertTrue(upper.waitForExistence(timeout: 2))
+            upper.tap()
+        }
+
+        let close = app.buttons["close-workout-button"]
+        XCTAssertTrue(close.waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["workout-options-menu"].exists)
+        close.tap()
+
+        XCTAssertTrue(resume.waitForExistence(timeout: 2))
+        resume.tap()
+        XCTAssertTrue(app.buttons["close-workout-button"].waitForExistence(timeout: 2))
+    }
 }

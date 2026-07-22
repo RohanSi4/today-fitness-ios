@@ -285,11 +285,12 @@ struct TodayView: View {
                 Button {
                     appState.presentedSheet = .workout(suggested: day?.workoutKind)
                 } label: {
-                    Label("Continue workout", systemImage: "play.fill")
+                    Label("Resume workout", systemImage: "play.fill")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
+                .accessibilityIdentifier("resume-workout-button")
             } else {
                 if let plannedKind = day?.workoutKind,
                    let completed = store.completedWorkoutToday(kind: plannedKind) {

@@ -41,6 +41,8 @@ it can become a reusable starter after the real workflow is proven.
 - Keeps recent exercises at the top and lets several be added in one pass
 - Folds completed exercises down and moves the next unfinished work into view
 - Lets exercises move up or down when gym equipment is busy
+- Lets me close a workout, use the rest of the app, and resume with every set intact
+- Keeps discard in a secondary menu with a confirmation instead of making it the main exit
 - Searches an offline-cached catalog of more than 700 lifting exercises
 - Lights up a detailed front and back muscle map as sets are completed
 - Keeps the full muscle map tucked away during the workout, then shows it in the recap
@@ -204,13 +206,14 @@ while the installed display name is **Today**.
 
 ## Tests
 
-The 42-test suite covers the original sleep scoring and recap correctness plus Today’s
+The 49-test suite covers the original sleep scoring and recap correctness plus Today’s
 same-day weight replacement, invalid values, active-workout relaunch, backup recovery,
 two-set workout reset, workout deletion, detailed muscle scoring, prior-value reuse,
 coach-plan lift detection, weekly plan and actual matching, every widget state, widget
 privacy, endpoint allowlisting, payload bounds, and isolation from production sync
-during tests. UI coverage opens the quick weight logger, opens the weekly snapshot, and
-verifies that Health Recap remains available from Insights.
+during tests. UI coverage opens the quick weight logger, opens the weekly snapshot,
+closes and resumes an active workout, and verifies that Health Recap remains available
+from Insights.
 
 ## Next platform slice
 
