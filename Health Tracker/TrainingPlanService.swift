@@ -13,6 +13,7 @@ final class TrainingPlanService: ObservableObject {
     private let endpoint = URL(string: "https://rohansingh04.com/api/running/ingest")!
     private let cacheURL: URL
     private let session: URLSession
+    private let maximumResponseBytes = 2_000_000
 
     init(session: URLSession = .shared, cacheURL: URL? = nil) {
         self.session = session
@@ -35,13 +36,17 @@ final class TrainingPlanService: ObservableObject {
         do {
             var request = URLRequest(url: endpoint)
             request.cachePolicy = .reloadIgnoringLocalCacheData
+            request.timeoutInterval = 15
             request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
             let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
                 throw URLError(.badServerResponse)
             }
+            guard data.count <= maximumResponseBytes else {
+                throw URLError(.dataLengthExceedsMaximum)
+            }
             let envelope = try Self.decoder.decode(DashboardEnvelope.self, from: data)
-            guard let incoming = envelope.trainingPlan else {
+            guard let incoming = envelope.trainingPlan, Self.isPlausible(incoming) else {
                 throw URLError(.cannotParseResponse)
             }
             plan = incoming
@@ -55,11 +60,32 @@ final class TrainingPlanService: ObservableObject {
 
     private func loadCache() {
         guard let data = try? Data(contentsOf: cacheURL),
-              let envelope = try? Self.decoder.decode(DashboardEnvelope.self, from: data) else {
+              data.count <= maximumResponseBytes,
+              let envelope = try? Self.decoder.decode(DashboardEnvelope.self, from: data),
+              let cachedPlan = envelope.trainingPlan,
+              Self.isPlausible(cachedPlan) else {
             return
         }
-        plan = envelope.trainingPlan
+        plan = cachedPlan
         lastUpdated = envelope.generatedAt
+    }
+
+    static func isPlausible(_ plan: TrainingPlan) -> Bool {
+        let datePattern = /^\d{4}-\d{2}-\d{2}$/
+        return plan.weekStart.wholeMatch(of: datePattern) != nil
+            && plan.weekEnd.wholeMatch(of: datePattern) != nil
+            && plan.weekStart <= plan.weekEnd
+            && plan.prescribedMiles >= 0
+            && plan.prescribedMiles <= 250
+            && (1...14).contains(plan.days.count)
+            && plan.days.allSatisfy { day in
+                day.date.wholeMatch(of: datePattern) != nil
+                    && day.date >= plan.weekStart
+                    && day.date <= plan.weekEnd
+                    && day.text.count <= 300
+                    && day.details.count <= 12
+                    && day.details.allSatisfy { $0.count <= 500 }
+            }
     }
 
     private static let dayFormatter: DateFormatter = {

@@ -1,3 +1,4 @@
+import AppIntents
 import Charts
 import SwiftUI
 
@@ -16,6 +17,7 @@ struct InsightsView: View {
                 weightProgress
                 weeklyTraining
                 coachConnection
+                quickAccess
                 recentMuscleWork
                 strengthProgress
 
@@ -115,7 +117,7 @@ struct InsightsView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
-            Text("The exact number stays in Today, Apple Health, and the encrypted coach sync.")
+            Text("Daily history stays in Today, Apple Health, and the encrypted coach sync. Public progress is always your choice.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -151,6 +153,21 @@ struct InsightsView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .todayCard()
+    }
+
+    private var quickAccess: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Quick access", systemImage: "bolt.fill")
+                .font(.headline)
+            Text("Log weight, open the plan, or start a workout from Siri, Spotlight, Shortcuts, or an Action Button.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            ShortcutsLink()
+                .shortcutsLinkStyle(.automaticOutline)
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .todayCard()
     }
 

@@ -29,6 +29,28 @@ struct TodayStoreTests {
         #expect(store.weights.isEmpty)
     }
 
+    @Test func temporaryStoresCannotReachTheRealCoachByDefault() {
+        let store = TodayStore(storageURL: temporaryURL("isolated-sync"))
+
+        #expect(!store.permitsExternalCoachSync)
+    }
+
+    @Test func anExplicitTestSyncReceivesFinishedWork() throws {
+        let sync = CoachSyncSpy()
+        let store = TodayStore(storageURL: temporaryURL("sync-spy"), syncService: sync)
+        let catalog = ExerciseCatalog(cacheURL: temporaryURL("sync-spy-catalog"))
+        store.beginWorkout(kind: .upper, catalog: catalog)
+        var workout = try #require(store.activeWorkout)
+        workout.exercises[0].sets[0].isComplete = true
+        store.updateActiveWorkout(workout)
+
+        _ = store.finishActiveWorkout()
+
+        #expect(store.permitsExternalCoachSync)
+        #expect(sync.scheduledSnapshots.count == 1)
+        #expect(sync.scheduledSnapshots[0].workouts.count == 1)
+    }
+
     @Test func nextWorkoutAlwaysStartsWithTwoSets() throws {
         let store = TodayStore(storageURL: temporaryURL("sets"))
         let catalog = ExerciseCatalog(cacheURL: temporaryURL("catalog"))
@@ -273,6 +295,7 @@ struct TodayStoreTests {
     }
 }
 
+@MainActor
 struct TrainingPlanModelTests {
     @Test func dayDetectsTheCoachChosenLiftWithoutExercisePrescription() throws {
         let day = TrainingPlanDay(
@@ -285,5 +308,88 @@ struct TrainingPlanModelTests {
 
         #expect(day.workoutKind == .lower)
         #expect(day.hasRun)
+    }
+
+    @Test func planValidationRejectsOversizedOrOutOfWeekPayloads() {
+        let valid = TrainingPlan(
+            weekStart: "2026-07-20",
+            weekEnd: "2026-07-26",
+            prescribedMiles: 35.5,
+            days: [
+                TrainingPlanDay(
+                    date: "2026-07-21",
+                    dayLabel: "Tue 7/21",
+                    text: "6 mile run + lower body lift",
+                    isKeyDay: false,
+                    details: ["Keep it easy."]
+                ),
+            ]
+        )
+        let invalid = TrainingPlan(
+            weekStart: valid.weekStart,
+            weekEnd: valid.weekEnd,
+            prescribedMiles: valid.prescribedMiles,
+            days: [
+                TrainingPlanDay(
+                    date: "2027-01-01",
+                    dayLabel: "Bad",
+                    text: "run",
+                    isKeyDay: false,
+                    details: []
+                ),
+            ]
+        )
+
+        #expect(TrainingPlanService.isPlausible(valid))
+        #expect(!TrainingPlanService.isPlausible(invalid))
+    }
+}
+
+@MainActor
+private final class CoachSyncSpy: CoachSyncing {
+    private(set) var scheduledSnapshots: [StoredTodayData] = []
+
+    func scheduleSync(snapshot: StoredTodayData, catalog: ExerciseCatalog) {
+        scheduledSnapshots.append(snapshot)
+    }
+
+    func sync(snapshot: StoredTodayData, catalog: ExerciseCatalog) async {}
+}
+
+@MainActor
+struct CoachSyncSecurityTests {
+    @Test func pairingAcceptsOnlyTheProductionSyncBoundary() {
+        #expect(CoachSyncService.isAllowedEndpoint(
+            URL(string: "https://rohansingh04.com/api/fitness/private-sync")!
+        ))
+        #expect(!CoachSyncService.isAllowedEndpoint(
+            URL(string: "https://rohansingh04.com.evil.example/api/fitness/private-sync")!
+        ))
+        #expect(!CoachSyncService.isAllowedEndpoint(
+            URL(string: "http://rohansingh04.com/api/fitness/private-sync")!
+        ))
+        #expect(!CoachSyncService.isAllowedEndpoint(
+            URL(string: "https://rohansingh04.com/api/fitness/private-sync?forward=true")!
+        ))
+    }
+}
+
+@MainActor
+struct WatchWorkoutTests {
+    @Test func runDistanceExtractionIgnoresStrideDurations() {
+        #expect(WatchWorkoutService.runMiles(from: "Easy 6 mile run + 4×20s strides") == 6)
+        #expect(WatchWorkoutService.runMiles(from: "13.5 mi long run outdoors") == 13.5)
+        #expect(WatchWorkoutService.runMiles(from: "Rest + upper body lift") == nil)
+    }
+
+    @Test func indoorAndOutdoorPlansMapToTheRightWatchLocation() {
+        #expect(WatchWorkoutService.location(from: "6 mile treadmill run") == .indoor)
+        #expect(WatchWorkoutService.location(from: "6 mile run outdoors") == .outdoor)
+        #expect(WatchWorkoutService.location(from: "6 mile run") == .unknown)
+    }
+
+    @Test func scheduledRunIDsAreStablePerPlanDate() {
+        #expect(WatchWorkoutService.planID(for: "2026-07-21") == WatchWorkoutService.planID(for: "2026-07-21"))
+        #expect(WatchWorkoutService.planID(for: "2026-07-21") != WatchWorkoutService.planID(for: "2026-07-22"))
     }
 }

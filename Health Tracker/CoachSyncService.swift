@@ -39,6 +39,12 @@ struct CoachSyncPairing: Codable, Equatable {
     let keyId: String
 }
 
+@MainActor
+protocol CoachSyncing: AnyObject {
+    func scheduleSync(snapshot: StoredTodayData, catalog: ExerciseCatalog)
+    func sync(snapshot: StoredTodayData, catalog: ExerciseCatalog) async
+}
+
 private struct PrivateFitnessSnapshot: Encodable {
     let schemaVersion = 1
     let generatedAt: Date
@@ -56,6 +62,15 @@ private struct PublicStrengthSession: Encodable {
     let updatedAt: String
 }
 
+private struct PublicWeightTrend: Encodable {
+    let asOf: String
+    let currentPounds: Double
+    let goalPounds: Double
+    let sevenDayAverage: Double
+    let change28Days: Double?
+    let daysLogged28: Int
+}
+
 private struct EncryptedPayload: Encodable {
     let algorithm = "AES-256-GCM"
     let keyId: String
@@ -71,6 +86,7 @@ private struct FitnessSyncBatch: Encodable {
     let createdAt: String
     let encryption: EncryptedPayload
     let publicStrength: [PublicStrengthSession]
+    let publicWeight: PublicWeightTrend?
 }
 
 private struct FitnessSyncResponse: Decodable {
@@ -79,12 +95,13 @@ private struct FitnessSyncResponse: Decodable {
 }
 
 @MainActor
-final class CoachSyncService: ObservableObject {
+final class CoachSyncService: ObservableObject, CoachSyncing {
     static let shared = CoachSyncService()
 
     @Published private(set) var state: CoachSyncState
     @Published private(set) var lastSyncedAt: Date?
     @Published private(set) var hasPendingChanges: Bool
+    @Published private(set) var sharesWeightTrend: Bool
 
     private let session: URLSession
     private let defaults: UserDefaults
@@ -96,6 +113,7 @@ final class CoachSyncService: ObservableObject {
     private static let lastSyncedKey = "coachSync.lastSyncedAt"
     private static let pendingKey = "coachSync.hasPendingChanges"
     private static let deviceKey = "coachSync.deviceId"
+    private static let sharesWeightKey = "coachSync.sharesWeightTrend"
 
     init(
         session: URLSession = .shared,
@@ -107,6 +125,7 @@ final class CoachSyncService: ObservableObject {
         self.keychain = keychain
         lastSyncedAt = defaults.object(forKey: Self.lastSyncedKey) as? Date
         hasPendingChanges = defaults.bool(forKey: Self.pendingKey)
+        sharesWeightTrend = defaults.bool(forKey: Self.sharesWeightKey)
         pairing = keychain.load(Self.pairingAccount).flatMap {
             try? JSONDecoder().decode(CoachSyncPairing.self, from: $0)
         }
@@ -128,14 +147,16 @@ final class CoachSyncService: ObservableObject {
 
     func connect(pairingCode: String) throws {
         let trimmed = pairingCode.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let data = Self.decodeBase64URL(trimmed),
+        guard trimmed.count <= 4_096,
+              let data = Self.decodeBase64URL(trimmed),
               let value = try? JSONDecoder().decode(CoachSyncPairing.self, from: data),
               value.schemaVersion == 1,
               let url = URL(string: value.endpoint),
-              url.scheme == "https",
-              !value.writeToken.isEmpty,
+              Self.isAllowedEndpoint(url),
+              value.writeToken.count >= 32,
               Data(base64Encoded: value.encryptionKey)?.count == 32,
-              !value.keyId.isEmpty else {
+              !value.keyId.isEmpty,
+              value.keyId.count <= 80 else {
             throw CoachSyncError.invalidPairingCode
         }
         let encoded = try JSONEncoder().encode(value)
@@ -144,6 +165,13 @@ final class CoachSyncService: ObservableObject {
         hasPendingChanges = true
         defaults.set(true, forKey: Self.pendingKey)
         state = .ready
+    }
+
+    func setWeightTrendSharing(_ enabled: Bool) {
+        guard sharesWeightTrend != enabled else { return }
+        sharesWeightTrend = enabled
+        defaults.set(enabled, forKey: Self.sharesWeightKey)
+        markPending()
     }
 
     func disconnect() {
@@ -155,6 +183,8 @@ final class CoachSyncService: ObservableObject {
         lastSyncedAt = nil
         defaults.removeObject(forKey: Self.pendingKey)
         defaults.removeObject(forKey: Self.lastSyncedKey)
+        defaults.removeObject(forKey: Self.sharesWeightKey)
+        sharesWeightTrend = false
         state = .notConnected
     }
 
@@ -179,7 +209,9 @@ final class CoachSyncService: ObservableObject {
 
         do {
             let batch = try makeBatch(snapshot: snapshot, catalog: catalog, pairing: pairing)
-            guard let endpoint = URL(string: pairing.endpoint) else { throw CoachSyncError.invalidPairingCode }
+            guard let endpoint = URL(string: pairing.endpoint), Self.isAllowedEndpoint(endpoint) else {
+                throw CoachSyncError.invalidPairingCode
+            }
             var request = URLRequest(url: endpoint)
             request.httpMethod = "POST"
             request.timeoutInterval = 20
@@ -245,7 +277,30 @@ final class CoachSyncService: ObservableObject {
                 ciphertext: sealed.ciphertext.base64EncodedString(),
                 tag: sealed.tag.base64EncodedString()
             ),
-            publicStrength: publicStrength(snapshot.workouts, catalog: catalog)
+            publicStrength: publicStrength(snapshot.workouts, catalog: catalog),
+            publicWeight: sharesWeightTrend ? publicWeight(snapshot) : nil
+        )
+    }
+
+    private func publicWeight(_ snapshot: StoredTodayData) -> PublicWeightTrend? {
+        guard let latest = snapshot.weights.max(by: { $0.date < $1.date }) else { return nil }
+        let calendar = Calendar.current
+        let latestDay = calendar.startOfDay(for: latest.date)
+        let sevenDayStart = calendar.date(byAdding: .day, value: -6, to: latestDay) ?? latestDay
+        let twentyEightDayStart = calendar.date(byAdding: .day, value: -27, to: latestDay) ?? latestDay
+        let sevenDay = snapshot.weights.filter { $0.date >= sevenDayStart && $0.date <= latest.date }
+        let twentyEightDay = snapshot.weights.filter { $0.date >= twentyEightDayStart && $0.date <= latest.date }
+        guard !sevenDay.isEmpty, !twentyEightDay.isEmpty else { return nil }
+        let oldest = twentyEightDay.min(by: { $0.date < $1.date })
+        let change = oldest?.id == latest.id ? nil : oldest.map { latest.pounds - $0.pounds }
+        let loggedDays = Set(twentyEightDay.map { Self.dayFormatter.string(from: $0.date) }).count
+        return PublicWeightTrend(
+            asOf: Self.dayFormatter.string(from: latest.date),
+            currentPounds: latest.pounds,
+            goalPounds: snapshot.goalWeight,
+            sevenDayAverage: sevenDay.map(\.pounds).reduce(0, +) / Double(sevenDay.count),
+            change28Days: change,
+            daysLogged28: min(28, loggedDays)
         )
     }
 
@@ -298,6 +353,17 @@ final class CoachSyncService: ObservableObject {
         return Data(base64Encoded: base64)
     }
 
+    static func isAllowedEndpoint(_ url: URL) -> Bool {
+        url.scheme == "https"
+            && url.host == "rohansingh04.com"
+            && url.port == nil
+            && url.user == nil
+            && url.password == nil
+            && url.path == "/api/fitness/private-sync"
+            && url.query == nil
+            && url.fragment == nil
+    }
+
     private static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -335,15 +401,22 @@ final class CoachSyncKeychain {
     private let service = "com.rohansingh.today.coach-sync"
 
     func save(_ data: Data, account: String) throws {
-        delete(account)
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
+        ]
+        let values: [String: Any] = [
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
             kSecValueData as String: data,
         ]
-        guard SecItemAdd(query as CFDictionary, nil) == errSecSuccess else {
+        let updateStatus = SecItemUpdate(query as CFDictionary, values as CFDictionary)
+        if updateStatus == errSecSuccess { return }
+        guard updateStatus == errSecItemNotFound else {
+            throw CoachSyncError.invalidPairingCode
+        }
+        let addQuery = query.merging(values) { _, new in new }
+        guard SecItemAdd(addQuery as CFDictionary, nil) == errSecSuccess else {
             throw CoachSyncError.invalidPairingCode
         }
     }

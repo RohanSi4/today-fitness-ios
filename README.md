@@ -22,6 +22,8 @@ it can become a reusable starter after the real workflow is proven.
 - Starts Upper, Lower, Push, Pull, Legs, Chest, or Back from a useful exercise template
 - Offers a blank workout when I just want to add exercises as I go
 - Opens weight, plan, or the workout picker from Siri, Spotlight, and Shortcuts
+- Links directly to those App Shortcuts so they are easy to add to Siri or an Action Button
+- Sends the coach's distance goal into Apple Workout with WorkoutKit, without starting a second workout session
 - Reuses the previous exercise order and values for each named workout type
 - Uses exactly two default working sets, with an optional extra set for strong days
 - Adjusts weight by exercise-specific increments and reps one at a time
@@ -42,6 +44,7 @@ it can become a reusable starter after the real workflow is proven.
 - Keeps the phone write token and encryption key in Keychain
 - Saves first, retries failed syncs later, and shows the connection state in Insights
 - Publishes only split, duration, working sets, and broad muscle groups to the fitness page
+- Lets me opt into a small public weight summary without publishing the daily history
 
 ## The private data boundary
 
@@ -53,18 +56,22 @@ Public coaching plan
         │
         ├── protected local history
         ├── AES-256-GCM private snapshot ─► website transport ─► coach decrypts
-        └── safe strength summary ────────────────────────────► fitness page
+        └── safe strength + optional weight summary ─────────► fitness page
 
 Apple Watch workout ─► Apple Health ─► HealthFit ─► marathon coach
+        ▲
+        └── Today schedules the coach's run through WorkoutKit
 ```
 
 Today does not replace or rewrite Apple Watch workouts. The Watch and HealthFit remain
 the workout source of truth. Today records the exercise detail that a generic Strength
 Training workout cannot capture.
 
-Exact body weight, exercise choices, reps, and lifting weights do not go to the public
+Exercise choices, reps, lifting weights, and daily weight history do not go to the public
 fitness dashboard. The public strength view uses split, duration, working-set count,
-and broad muscle frequency without exposing the underlying gym log.
+and broad muscle frequency without exposing the underlying gym log. Weight progress is
+off by default. If I turn it on, the site gets the current number, 7-day average,
+28-day change, goal, and logging consistency instead of the raw history.
 
 ## Exercise catalog and anatomy
 
@@ -120,7 +127,8 @@ CoachSyncService
     ├── Keychain pairing credentials
     ├── local-first retry state
     ├── AES-256-GCM private snapshot
-    └── smaller public strength projection
+    ├── strict production endpoint boundary
+    └── smaller consent-controlled public projection
 
 HealthKitManager
     ├── read sleep and movement
@@ -131,6 +139,11 @@ NotificationManager
     ├── wake-aware prompt
     ├── 8:30 AM fallback
     └── noon follow-up
+
+WatchWorkoutService
+    ├── validates the coach's run distance and date
+    ├── schedules a stable, duplicate-safe WorkoutKit plan
+    └── leaves workout recording to Apple Watch
 ```
 
 The app targets iOS 17 and uses SwiftUI, HealthKit, App Intents, async/await, and
@@ -147,11 +160,11 @@ The project already uses automatic signing and has Rohan's development team sele
 4. In the top Xcode toolbar, click the device name beside the **Health Tracker** scheme and choose the connected iPhone instead of the simulator.
 5. Press the Run triangle or `Command-R`.
 6. If the phone asks for Developer Mode, open **Settings > Privacy & Security > Developer Mode**, turn it on, restart, confirm it after the restart, then press Run in Xcode again.
-7. On first launch, allow Apple Health access and notifications. Body weight stays private and the workout logger remains separate from the Apple Watch workout record.
+7. On first launch, allow Apple Health access and notifications. Public weight sharing starts off and the workout logger remains separate from the Apple Watch workout record.
 
 To connect the private coach, run `npm run pair:today` from the Marathon Prep Bot
 repo. Add the generated read and write transport tokens to Vercel, then paste the
-one-time connection code into **Insights > Coach sync**. The encryption key is never
+pairing code into **Insights > Coach sync**. The encryption key is never
 added to the website environment.
 
 After the first wired pairing, Xcode can usually reconnect to the phone on the same network. A free Personal Team install expires after seven days, so press Run again from Xcode when it needs to be refreshed. A paid Apple Developer team avoids that weekly reinstall.
@@ -170,15 +183,21 @@ while the installed display name is **Today**.
 
 ## Tests
 
-The 31-test suite covers the original sleep scoring and recap correctness plus Today’s
+The 38-test suite covers the original sleep scoring and recap correctness plus Today’s
 same-day weight replacement, invalid values, active-workout relaunch, backup recovery,
 two-set workout reset, workout deletion, detailed muscle scoring, prior-value reuse,
-and coach-plan lift detection. UI coverage opens the quick weight logger and verifies
+coach-plan lift detection, endpoint allowlisting, payload bounds, and isolation from
+production sync during tests. UI coverage opens the quick weight logger and verifies
 that Health Recap remains available from Insights.
 
 ## Next platform slice
 
-The next slice is a Lock Screen widget backed by the same App Intents. It should show
-whether morning weight is logged and today’s run plus Upper or Lower plan without
-showing the exact weight. A workout Live Activity can then keep the current exercise
-and completed-set count on the Lock Screen and Dynamic Island.
+The current Apple Watch job stays simple. For runs, Today can schedule the coach's
+distance goal in Apple Workout through WorkoutKit. For lifting, I still start Apple's
+Strength Training workout and use Today on the phone for sets. A separate Watch workout
+session would duplicate ownership and create bad HealthKit edge cases.
+
+The next justified Watch slice is a read-only Smart Stack widget for today’s run and
+Upper or Lower plan. It should appear only when the wrist glance proves more useful than
+the existing plan shortcut. On iPhone, a Lock Screen widget and workout Live Activity
+can reuse the same App Intents without changing who owns the workout record.

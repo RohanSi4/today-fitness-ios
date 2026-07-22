@@ -13,16 +13,26 @@ final class TodayStore: ObservableObject {
 
     private let storageURL: URL
     private let calendar: Calendar
-    private let syncService: CoachSyncService
+    private let syncService: any CoachSyncing
+    private(set) var permitsExternalCoachSync: Bool
     private var pendingPersistTask: Task<Void, Never>?
 
     init(
         storageURL: URL? = nil,
         calendar: Calendar = .current,
-        syncService: CoachSyncService? = nil
+        syncService: (any CoachSyncing)? = nil
     ) {
         self.calendar = calendar
-        self.syncService = syncService ?? CoachSyncService.shared
+        if let syncService {
+            self.syncService = syncService
+            permitsExternalCoachSync = true
+        } else if storageURL == nil {
+            self.syncService = CoachSyncService.shared
+            permitsExternalCoachSync = true
+        } else {
+            self.syncService = DisabledCoachSync()
+            permitsExternalCoachSync = false
+        }
         self.storageURL = storageURL ?? Self.defaultStorageURL
         load()
     }
@@ -261,4 +271,10 @@ final class TodayStore: ObservableObject {
         return base.appendingPathComponent("Today", isDirectory: true)
             .appendingPathComponent("private-data.json")
     }
+}
+
+@MainActor
+private final class DisabledCoachSync: CoachSyncing {
+    func scheduleSync(snapshot: StoredTodayData, catalog: ExerciseCatalog) {}
+    func sync(snapshot: StoredTodayData, catalog: ExerciseCatalog) async {}
 }

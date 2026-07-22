@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import AppIntents
 
 @main
 struct Health_TrackerApp: App {
@@ -16,6 +17,7 @@ struct Health_TrackerApp: App {
         _appState = StateObject(wrappedValue: state)
         NotificationManager.shared.appState = state
         NotificationManager.shared.register()
+        TodayShortcuts.updateAppShortcutParameters()
         HealthKitManager.shared.startSleepWakeMonitoring { wakeTime in
             NotificationManager.shared.scheduleWeightReminderAfterWake(wakeTime)
         }

@@ -43,6 +43,22 @@ struct CoachSyncView: View {
                     } footer: {
                         Text("Today keeps working offline. A failed sync never blocks weight or workout logging.")
                     }
+
+                    Section {
+                        Toggle(
+                            "Share weight progress",
+                            isOn: Binding(
+                                get: { service.sharesWeightTrend },
+                                set: { updateWeightSharing($0) }
+                            )
+                        )
+                        Label("Strength totals and muscle groups are shared", systemImage: "checkmark.shield")
+                            .font(.subheadline)
+                    } header: {
+                        Text("Public fitness page")
+                    } footer: {
+                        Text("Weight sharing is optional. It sends the current number, 7-day average, 28-day change, goal, and logging consistency. It never sends the daily history.")
+                    }
                 } else {
                     Section {
                         TextField("Paste connection code", text: $pairingCode, axis: .vertical)
@@ -60,7 +76,7 @@ struct CoachSyncView: View {
                         }
                         .disabled(pairingCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     } header: {
-                        Text("One-time setup")
+                        Text("Pairing")
                     } footer: {
                         Text("Generate the code from the private coach repo. The encryption key is stored in this phone's Keychain.")
                     }
@@ -69,7 +85,7 @@ struct CoachSyncView: View {
                 Section("What syncs") {
                     Label("Morning weight and weight trend", systemImage: "scalemass")
                     Label("Finished exercises, sets, reps, and load", systemImage: "dumbbell")
-                    Label("A small strength summary for the public fitness page", systemImage: "chart.bar")
+                    Label("A small, controlled summary for the public fitness page", systemImage: "chart.bar")
                 }
 
                 Section {
@@ -120,5 +136,10 @@ struct CoachSyncView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func updateWeightSharing(_ enabled: Bool) {
+        service.setWeightTrendSharing(enabled)
+        Task { await store.syncWithCoach() }
     }
 }

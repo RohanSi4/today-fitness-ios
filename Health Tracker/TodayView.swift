@@ -5,6 +5,7 @@ struct TodayView: View {
     @ObservedObject var store: TodayStore
     @ObservedObject var planService: TrainingPlanService
     @ObservedObject var catalog: ExerciseCatalog
+    @StateObject private var watchWorkouts = WatchWorkoutService.shared
 
     private var day: TrainingPlanDay? { planService.today }
 
@@ -108,6 +109,10 @@ struct TodayView: View {
                     }
                 }
 
+                if let miles = WatchWorkoutService.runMiles(from: day.text) {
+                    watchRunButton(day: day, miles: miles)
+                }
+
             } else if planService.isLoading || (planService.plan == nil && planService.errorMessage == nil) {
                 ProgressView("Loading today’s plan")
                     .frame(maxWidth: .infinity, minHeight: 120)
@@ -133,6 +138,41 @@ struct TodayView: View {
         }
         .padding(18)
         .todayCard()
+    }
+
+    private func watchRunButton(day: TrainingPlanDay, miles: Double) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Divider()
+            Button {
+                Task { await watchWorkouts.send(day) }
+            } label: {
+                HStack {
+                    Label(watchButtonLabel(day: day, miles: miles), systemImage: "applewatch")
+                    Spacer()
+                    if watchWorkouts.state == .sending(day.date) {
+                        ProgressView().controlSize(.small)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.bordered)
+            .disabled(!watchWorkouts.isSupported || watchWorkouts.state == .sending(day.date))
+
+            if !watchWorkouts.isSupported {
+                Text("This turns on when a paired Apple Watch supports scheduled workouts.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if case .failed(let message) = watchWorkouts.state {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(TodayPalette.warm)
+            }
+        }
+    }
+
+    private func watchButtonLabel(day: TrainingPlanDay, miles: Double) -> String {
+        if watchWorkouts.state == .scheduled(day.date) { return "Run added to Apple Watch" }
+        return "Add \(miles.formatted(.number.precision(.fractionLength(0...2)))) mi to Apple Watch"
     }
 
     private var workoutCard: some View {

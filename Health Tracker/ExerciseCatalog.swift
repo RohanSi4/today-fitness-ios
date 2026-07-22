@@ -13,6 +13,7 @@ final class ExerciseCatalog: ObservableObject {
     private let sourceURL = URL(
         string: "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/dist/exercises.json"
     )!
+    private let maximumDownloadBytes = 12_000_000
 
     init(session: URLSession = .shared, cacheURL: URL? = nil) {
         self.session = session
@@ -33,9 +34,14 @@ final class ExerciseCatalog: ObservableObject {
         defer { isLoading = false }
 
         do {
-            let (data, response) = try await session.data(from: sourceURL)
+            var request = URLRequest(url: sourceURL)
+            request.timeoutInterval = 15
+            request.cachePolicy = .reloadRevalidatingCacheData
+            let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return }
+            guard data.count <= maximumDownloadBytes else { return }
             let remote = try JSONDecoder().decode([RemoteExercise].self, from: data)
+            guard remote.count <= 5_000 else { return }
             try? data.write(to: cacheURL, options: .atomic)
             exercises = Self.merge(seed: Self.seedExercises, remote: remote)
                 .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }

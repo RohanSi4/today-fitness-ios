@@ -83,7 +83,7 @@ struct WeightLogView: View {
                 .controlSize(.large)
                 .disabled(isSaving || value <= 0)
 
-                Text("The exact number stays private and never goes to your public fitness page.")
+                Text("The exact number stays private unless you choose to share a small progress summary in Coach sync.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
