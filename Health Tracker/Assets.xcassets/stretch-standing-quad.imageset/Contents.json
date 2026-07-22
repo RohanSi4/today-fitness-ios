@@ -1,0 +1,12 @@
+{
+  "images": [
+    {
+      "filename": "stretch-standing-quad.png",
+      "idiom": "universal"
+    }
+  ],
+  "info": {
+    "author": "xcode",
+    "version": 1
+  }
+}

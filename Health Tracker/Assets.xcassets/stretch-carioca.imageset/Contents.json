@@ -1,0 +1,12 @@
+{
+  "images": [
+    {
+      "filename": "stretch-carioca.png",
+      "idiom": "universal"
+    }
+  ],
+  "info": {
+    "author": "xcode",
+    "version": 1
+  }
+}
