@@ -55,6 +55,8 @@ struct ContentView: View {
                 )
             case .finishedWorkout(let session):
                 WorkoutSummaryView(session: session, store: store, catalog: catalog)
+            case .stretch(let phase):
+                StretchRoutineView(initialPhase: phase)
             }
         }
         .onChange(of: intentRouter.route) { _, route in
@@ -77,6 +79,8 @@ struct ContentView: View {
             switch url.host {
             case "weight": appState.openWeightLogger()
             case "workout": appState.openWorkout()
+            case "stretch", "stretches", "warmup": appState.openStretches(.dynamic)
+            case "cooldown": appState.openStretches(.cooldown)
             case "history": appState.selectedTab = .history
             case "week": appState.selectedTab = .insights
             default: appState.selectedTab = .today

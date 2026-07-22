@@ -24,6 +24,7 @@ struct TodayView: View {
                 header
                 weightPrompt
                 planCard
+                stretchesCard
                 NavigationLink {
                     WeeklySnapshotView(
                         store: store,
@@ -94,6 +95,37 @@ struct TodayView: View {
         .buttonStyle(.plain)
         .todayCard()
         .accessibilityIdentifier("log-weight-button")
+    }
+
+    private var stretchesCard: some View {
+        Button {
+            appState.presentedSheet = .stretch(phase: .dynamic)
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: "figure.flexibility")
+                    .font(.title2)
+                    .foregroundStyle(TodayPalette.warm)
+                    .frame(width: 44, height: 44)
+                    .background(TodayPalette.warm.opacity(0.12), in: RoundedRectangle(cornerRadius: 13))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Stretches")
+                        .font(.headline)
+                    Text("Dynamic warm-up before · static cool-down after")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(16)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .todayCard()
+        .accessibilityIdentifier("stretches-button")
     }
 
     @ViewBuilder

@@ -21,18 +21,25 @@ final class AppState: ObservableObject {
         selectedTab = .today
         presentedSheet = .workout(suggested: nil)
     }
+
+    func openStretches(_ phase: StretchPhase = .dynamic) {
+        selectedTab = .today
+        presentedSheet = .stretch(phase: phase)
+    }
 }
 
 enum TodaySheet: Identifiable {
     case weight
     case workout(suggested: WorkoutKind?)
     case finishedWorkout(WorkoutSession)
+    case stretch(phase: StretchPhase)
 
     var id: String {
         switch self {
         case .weight: "weight"
         case .workout: "workout"
         case .finishedWorkout: "summary"
+        case .stretch: "stretch"
         }
     }
 }
