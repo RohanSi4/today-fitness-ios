@@ -69,7 +69,7 @@ private struct WorkoutHistoryRow: View {
                 .frame(width: 36, height: 36)
                 .background(TodayPalette.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
             VStack(alignment: .leading, spacing: 3) {
-                Text("\(session.kind.title) workout")
+                Text(session.kind.workoutTitle)
                     .font(.subheadline.weight(.semibold))
                 Text(session.startedAt.formatted(.dateTime.month().day().hour().minute()))
                     .font(.caption)
@@ -117,7 +117,7 @@ private struct WorkoutDetailView: View {
             .padding(16)
         }
         .background(Color(.systemGroupedBackground))
-        .navigationTitle(session.kind.title)
+        .navigationTitle(session.kind.workoutTitle)
         .navigationBarTitleDisplayMode(.inline)
     }
 

@@ -35,6 +35,41 @@ struct TodayStoreTests {
         #expect(next.exercises[0].sets.count == 2)
     }
 
+    @Test func everyWorkoutStartingPointIsAvailable() {
+        let catalog = ExerciseCatalog(cacheURL: temporaryURL("split-catalog"))
+        let expectedKinds: Set<WorkoutKind> = [
+            .upper, .lower, .push, .pull, .legs, .chest, .back, .other,
+        ]
+
+        #expect(Set(WorkoutKind.allCases) == expectedKinds)
+        #expect(!catalog.defaultExerciseIDs(for: .push).isEmpty)
+        #expect(!catalog.defaultExerciseIDs(for: .pull).isEmpty)
+        #expect(!catalog.defaultExerciseIDs(for: .legs).isEmpty)
+        #expect(!catalog.defaultExerciseIDs(for: .chest).isEmpty)
+        #expect(!catalog.defaultExerciseIDs(for: .back).isEmpty)
+        #expect(catalog.defaultExerciseIDs(for: .other).isEmpty)
+    }
+
+    @Test func blankWorkoutAlwaysStartsEmpty() throws {
+        let store = TodayStore(storageURL: temporaryURL("blank-workout"))
+        let catalog = ExerciseCatalog(cacheURL: temporaryURL("blank-catalog"))
+
+        store.beginWorkout(kind: .other, catalog: catalog)
+        var first = try #require(store.activeWorkout)
+        #expect(first.exercises.isEmpty)
+
+        first.exercises = [
+            LoggedExercise(exerciseID: "machine-chest-fly", sets: catalog.defaultSets(for: "machine-chest-fly")),
+        ]
+        first.exercises[0].sets[0].isComplete = true
+        store.updateActiveWorkout(first)
+        _ = store.finishActiveWorkout()
+
+        store.beginWorkout(kind: .other, catalog: catalog)
+        let next = try #require(store.activeWorkout)
+        #expect(next.exercises.isEmpty)
+    }
+
     @Test func chestFlyMapsToDetailedMuscles() throws {
         let catalog = ExerciseCatalog(cacheURL: temporaryURL("muscles"))
         let exercise = try #require(catalog.exercise(id: "machine-chest-fly"))

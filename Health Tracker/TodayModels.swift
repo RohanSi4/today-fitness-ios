@@ -27,10 +27,51 @@ enum AppTab: String, CaseIterable, Identifiable {
 enum WorkoutKind: String, Codable, CaseIterable, Identifiable {
     case upper
     case lower
+    case push
+    case pull
+    case legs
+    case chest
+    case back
     case other
 
     var id: Self { self }
-    var title: String { rawValue.capitalized }
+
+    var title: String {
+        self == .other ? "Blank" : rawValue.capitalized
+    }
+
+    var workoutTitle: String {
+        self == .other ? "Workout" : "\(title) workout"
+    }
+
+    var completionTitle: String {
+        self == .other ? "Workout complete" : "\(title) complete"
+    }
+
+    var symbol: String {
+        switch self {
+        case .upper: "figure.strengthtraining.traditional"
+        case .lower, .legs: "figure.run"
+        case .push: "arrow.up.forward"
+        case .pull: "arrow.down.backward"
+        case .chest: "figure.arms.open"
+        case .back: "figure.strengthtraining.functional"
+        case .other: "plus"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .upper: "Your usual upper day"
+        case .lower: "Your usual lower day"
+        case .push: "Chest, shoulders, and triceps"
+        case .pull: "Back and biceps"
+        case .legs: "Build a leg day"
+        case .chest: "Chest-focused"
+        case .back: "Back-focused"
+        case .other: "Start empty and add anything"
+        }
+    }
 }
 
 enum ExerciseLoadMode: String, Codable {

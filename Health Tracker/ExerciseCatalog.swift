@@ -85,6 +85,40 @@ final class ExerciseCatalog: ObservableObject {
                 "kneeling-rope-cable-crunch",
                 "crunch"
             ]
+        case .push:
+            [
+                "machine-chest-fly",
+                "incline-machine-chest-press",
+                "neutral-grip-machine-shoulder-press",
+                "rope-triceps-pushdown",
+                "single-arm-cable-lateral-raise"
+            ]
+        case .pull:
+            [
+                "lat-pulldown",
+                "seated-machine-row",
+                "incline-dumbbell-curl"
+            ]
+        case .legs:
+            [
+                "seated-leg-extension",
+                "seated-leg-curl",
+                "hip-adductor-machine",
+                "hip-abductor-machine",
+                "calf-raise",
+                "kneeling-rope-cable-crunch",
+                "crunch"
+            ]
+        case .chest:
+            [
+                "machine-chest-fly",
+                "incline-machine-chest-press"
+            ]
+        case .back:
+            [
+                "lat-pulldown",
+                "seated-machine-row"
+            ]
         case .other:
             []
         }

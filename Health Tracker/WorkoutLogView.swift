@@ -86,7 +86,7 @@ struct WorkoutLogView: View {
                 .background(Color(.systemGroupedBackground))
                 .scrollDismissesKeyboard(.interactively)
             }
-            .navigationTitle("\(kind.title) workout")
+            .navigationTitle(kind.workoutTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -453,7 +453,7 @@ struct WorkoutSummaryView: View {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 48))
                             .foregroundStyle(.green)
-                        Text("\(session.kind.title) complete")
+                        Text(session.kind.completionTitle)
                             .font(.title2.weight(.bold))
                         Text(
                             session.completedSetCount == 1

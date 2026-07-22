@@ -18,7 +18,10 @@ it can become a reusable starter after the real workflow is proven.
 - Saves body weight to Apple Health and mirrors it in a private local history
 - Schedules an 8:30 AM reminder and a noon fallback when weight is still missing
 - Watches for newly completed HealthKit sleep and can move the reminder closer to wake time
-- Starts every Upper or Lower session from the previous exercise order and values
+- Keeps working when the coach plan ends, expires, or cannot refresh
+- Starts Upper, Lower, Push, Pull, Legs, Chest, or Back from a useful exercise template
+- Offers a blank workout when I just want to add exercises as I go
+- Reuses the previous exercise order and values for each named workout type
 - Uses exactly two default working sets, with an optional extra set for strong days
 - Adjusts weight by exercise-specific increments and reps one at a time
 - Keeps dumbbell loads per hand and unilateral reps per side
@@ -77,7 +80,7 @@ small amount of credit, and direct forearm exercises count fully.
 
 The base anatomy vectors are adapted from
 [`HichamELBSI/react-native-body-highlighter`](https://github.com/HichamELBSI/react-native-body-highlighter)
-under the MIT License. Today adds the front and back switch, smaller muscle splits,
+under the MIT License. Today adds the side-by-side anatomy view, smaller muscle splits,
 workout scoring, labels, and native SwiftUI interaction.
 
 ## Architecture
@@ -87,6 +90,7 @@ SwiftUI app shell
     ├── Today
     │   ├── TrainingPlanService
     │   ├── WeightLogView
+    │   ├── WorkoutStartFlow
     │   └── WorkoutLogView
     ├── History
     └── Insights

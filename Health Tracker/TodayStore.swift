@@ -120,7 +120,7 @@ final class TodayStore: ObservableObject {
     }
 
     private func starterExercises(for kind: WorkoutKind, catalog: ExerciseCatalog) -> [LoggedExercise] {
-        let prior = workouts.first { $0.kind == kind }
+        let prior = kind == .other ? nil : workouts.first { $0.kind == kind }
         let ids = prior?.exercises.map(\.exerciseID) ?? catalog.defaultExerciseIDs(for: kind)
 
         return ids.map { exerciseID in

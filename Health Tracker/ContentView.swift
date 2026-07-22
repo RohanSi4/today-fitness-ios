@@ -32,8 +32,12 @@ struct ContentView: View {
             switch sheet {
             case .weight:
                 WeightLogView(store: store)
-            case .startWorkout(let kind):
-                WorkoutLogView(store: store, catalog: catalog, kind: kind)
+            case .workout(let suggested):
+                WorkoutStartFlow(
+                    store: store,
+                    catalog: catalog,
+                    suggestedKind: suggested
+                )
             case .finishedWorkout(let session):
                 WorkoutSummaryView(session: session, store: store, catalog: catalog)
             }

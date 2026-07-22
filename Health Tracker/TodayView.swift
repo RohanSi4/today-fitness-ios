@@ -14,6 +14,7 @@ struct TodayView: View {
                 header
                 weightPrompt
                 planCard
+                workoutCard
                 if day?.isRestOnly == true {
                     RecoveryPreviewCard()
                 }
@@ -107,43 +108,77 @@ struct TodayView: View {
                     }
                 }
 
-                if let kind = day.workoutKind {
-                    if let completed = store.completedWorkoutToday(kind: kind) {
-                        Button {
-                            appState.presentedSheet = .finishedWorkout(completed)
-                        } label: {
-                            Label("\(kind.title) logged", systemImage: "checkmark.circle.fill")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.large)
-                        .tint(.green)
-                    } else {
-                        Button {
-                            if store.activeWorkout == nil {
-                                store.beginWorkout(kind: kind, catalog: catalog)
-                            }
-                            appState.presentedSheet = .startWorkout(store.activeWorkout?.kind ?? kind)
-                        } label: {
-                            Label(
-                                store.activeWorkout == nil ? "Start \(kind.title)" : "Continue workout",
-                                systemImage: "dumbbell.fill"
-                            )
-                            .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
-                    }
-                }
-            } else if let error = planService.errorMessage {
+            } else if planService.isLoading || (planService.plan == nil && planService.errorMessage == nil) {
+                ProgressView("Loading today’s plan")
+                    .frame(maxWidth: .infinity, minHeight: 120)
+            } else if let error = planService.errorMessage, planService.plan == nil {
                 ContentUnavailableView(
                     "Plan unavailable",
                     systemImage: "wifi.slash",
                     description: Text(error)
                 )
             } else {
-                ProgressView("Loading today’s plan")
-                    .frame(maxWidth: .infinity, minHeight: 120)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Nothing planned today")
+                        .font(.title3.weight(.bold))
+                    Text("You can still start any workout below.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(18)
+        .todayCard()
+    }
+
+    private var workoutCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("Workout", systemImage: "dumbbell.fill")
+                .font(.headline)
+
+            if let active = store.activeWorkout {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("\(active.kind.workoutTitle) in progress")
+                        .font(.title3.weight(.bold))
+                    Text("\(active.completedSetCount) sets checked off so far")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                Button {
+                    appState.presentedSheet = .workout(suggested: day?.workoutKind)
+                } label: {
+                    Label("Continue workout", systemImage: "play.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+            } else {
+                if let plannedKind = day?.workoutKind,
+                   let completed = store.completedWorkoutToday(kind: plannedKind) {
+                    Button {
+                        appState.presentedSheet = .finishedWorkout(completed)
+                    } label: {
+                        Label("\(plannedKind.title) logged", systemImage: "checkmark.circle.fill")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.green)
+                } else {
+                    Text("Choose a split or start empty and add whatever you want.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                Button {
+                    appState.presentedSheet = .workout(suggested: day?.workoutKind)
+                } label: {
+                    Label("Start workout", systemImage: "play.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .accessibilityIdentifier("start-workout-button")
             }
         }
         .padding(18)

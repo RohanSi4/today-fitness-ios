@@ -20,13 +20,13 @@ final class AppState: ObservableObject {
 
 enum TodaySheet: Identifiable {
     case weight
-    case startWorkout(WorkoutKind)
+    case workout(suggested: WorkoutKind?)
     case finishedWorkout(WorkoutSession)
 
     var id: String {
         switch self {
         case .weight: "weight"
-        case .startWorkout: "workout"
+        case .workout: "workout"
         case .finishedWorkout: "summary"
         }
     }
