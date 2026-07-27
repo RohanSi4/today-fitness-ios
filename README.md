@@ -211,7 +211,7 @@ while the installed display name is **Today**.
 
 ## Tests
 
-The 50+ test suite covers the original sleep scoring and recap correctness plus Today’s
+The 59-test suite, 52 unit tests plus 7 UI tests, covers the original sleep scoring and recap correctness plus Today’s
 same-day weight replacement, invalid values, active-workout relaunch, backup recovery,
 two-set workout reset, workout deletion, detailed muscle scoring, prior-value reuse,
 coach-plan lift detection, weekly plan and actual matching, every widget state, widget

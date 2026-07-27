@@ -1,0 +1,129 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build and test
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    env:
+      PROJECT: Health Tracker.xcodeproj
+      APP_SCHEME: Health Tracker
+      WIDGET_SCHEME: TodayWidget
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Select the newest installed Xcode
+        run: |
+          set -euo pipefail
+          latest=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          echo "Using $latest"
+          sudo xcode-select -s "$latest/Contents/Developer"
+          xcodebuild -version
+          swift --version
+
+      # The runner image changes its simulator lineup over time, so pick a device
+      # at run time instead of hardcoding a name that can silently disappear.
+      - name: Pick an iPhone simulator
+        id: sim
+        run: |
+          set -euo pipefail
+          udid=$(xcrun simctl list devices available --json | python3 -c '
+          import json, sys
+          data = json.load(sys.stdin)["devices"]
+          best = None
+          for runtime, devices in data.items():
+              if "iOS" not in runtime:
+                  continue
+              raw = runtime.split("iOS-")[-1]
+              try:
+                  version = tuple(int(p) for p in raw.split("-"))
+              except ValueError:
+                  continue
+              for device in devices:
+                  if not device.get("isAvailable"):
+                      continue
+                  if "iPhone" not in device.get("name", ""):
+                      continue
+                  key = (version, device["name"])
+                  if best is None or key > best[0]:
+                      best = (key, device)
+          if best is None:
+              sys.exit("No available iPhone simulator on this runner")
+          device = best[1]
+          print(device["udid"])
+          ' )
+          name=$(xcrun simctl list devices available | grep "$udid" | sed 's/ (.*//; s/^ *//')
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+          echo "Selected simulator: $name ($udid)"
+
+      - name: Build the app
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project "$PROJECT" \
+            -scheme "$APP_SCHEME" \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Build the widget extension
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project "$PROJECT" \
+            -scheme "$WIDGET_SCHEME" \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      # Runs both bundles: 52 swift-testing unit tests and 7 XCUITest cases.
+      # HealthKit is unavailable in Simulator, so the app takes its mock and
+      # simulator-only paths here. Real Health reads and body-mass writes still
+      # need a physical iPhone.
+      - name: Run tests
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project "$PROJECT" \
+            -scheme "$APP_SCHEME" \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -resultBundlePath TestResults.xcresult \
+            CODE_SIGNING_ALLOWED=NO \
+            test
+
+      - name: Summarize results
+        if: always()
+        run: |
+          set -uo pipefail
+          [ -d TestResults.xcresult ] || exit 0
+          xcrun xcresulttool get test-results summary --path TestResults.xcresult > summary.json
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          data = json.load(open("summary.json"))
+          print("| metric | value |")
+          print("| --- | --- |")
+          for key in ("result", "passedTests", "failedTests", "skippedTests"):
+              print(f"| {key} | {data.get(key)} |")
+          PY
+
+      - name: Upload result bundle on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TestResults
+          path: TestResults.xcresult
+          retention-days: 7

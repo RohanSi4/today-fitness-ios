@@ -79,6 +79,8 @@ private struct StretchProgressHeader: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(TodayPalette.accent)
                 }
+                .padding(.vertical, 6)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Choose routine step, currently \(session.progressLabel)")
@@ -199,7 +201,6 @@ private struct StretchHoldTimerCard: View {
             }
             .padding(18)
             .todayCard()
-            .accessibilityIdentifier("stretch-hold-timer-card")
             .onChange(of: seconds) { _, newValue in
                 if newValue == 0, timer.isRunning {
                     onTimerFinished()
