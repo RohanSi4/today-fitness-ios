@@ -11,6 +11,11 @@ final class TodayStore: ObservableObject {
     @Published var goalWeight: Double = 175
     @Published private(set) var dataRecoveryMessage: String?
 
+    /// False only when a load failed because the bytes were unreadable, which gates
+    /// every write. Starts true so a fresh install, which legitimately has no file,
+    /// can save normally.
+    private var didLoadCleanly = true
+
     private let storageURL: URL
     private let calendar: Calendar
     private let syncService: any CoachSyncing
@@ -197,26 +202,73 @@ final class TodayStore: ObservableObject {
         }
     }
 
-    private func load() {
-        guard FileManager.default.fileExists(atPath: storageURL.path) else { return }
-        if let stored = decodeStoredData(at: storageURL) {
-            apply(stored)
-            return
-        }
+    /// Why a read failed, because "no bytes" and "bad bytes" need opposite responses.
+    private enum StoredDataRead {
+        case missing
+        case decoded(StoredTodayData)
+        /// The bytes could not be read at all. Almost always `.completeFileProtection`
+        /// while the phone is locked, not corruption.
+        case unreadable
+        /// Bytes were read but did not decode. This one really is corruption.
+        case corrupt
+    }
 
-        let backupURL = storageURL.appendingPathExtension("backup")
-        if let stored = decodeStoredData(at: backupURL) {
+    private func readStoredData(at url: URL) -> StoredDataRead {
+        guard FileManager.default.fileExists(atPath: url.path) else { return .missing }
+        guard let data = try? Data(contentsOf: url) else { return .unreadable }
+        guard let stored = try? JSONDecoder().decode(StoredTodayData.self, from: data) else { return .corrupt }
+        return .decoded(stored)
+    }
+
+    // The app can launch in the background while the phone is locked, because
+    // HealthKit registers `.immediate` delivery for sleep and workouts. A watch run
+    // syncing at 6am with the phone on the nightstand does exactly that. Under
+    // `.completeFileProtection` the data file is then unreadable, and the old code
+    // could not tell that apart from corruption: `fileExists` still returns true,
+    // both the primary and the backup fail to read, and the store came up EMPTY.
+    // That empty state was then published to the widget ("Log morning weight" after
+    // you already had) and, worse, any later save wrote it over the good file.
+    private func load() {
+        switch readStoredData(at: storageURL) {
+        case .missing:
+            didLoadCleanly = true
+        case .decoded(let stored):
             apply(stored)
+            didLoadCleanly = true
+        case .unreadable:
+            markUnreadable()
+        case .corrupt:
+            loadFromBackup()
+        }
+    }
+
+    private func loadFromBackup() {
+        switch readStoredData(at: storageURL.appendingPathExtension("backup")) {
+        case .decoded(let stored):
+            apply(stored)
+            didLoadCleanly = true
             dataRecoveryMessage = "Today restored the last good copy of your private data."
             persist()
-        } else {
+        case .unreadable:
+            markUnreadable()
+        case .missing, .corrupt:
+            // Genuinely unrecoverable rather than locked, so writing is safe again.
+            didLoadCleanly = true
             dataRecoveryMessage = "Today could not read the saved data. The original file was left in place."
         }
     }
 
-    private func decodeStoredData(at url: URL) -> StoredTodayData? {
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        return try? JSONDecoder().decode(StoredTodayData.self, from: data)
+    private func markUnreadable() {
+        didLoadCleanly = false
+        dataRecoveryMessage = "Today could not read your saved data because the phone was locked. It will load once you unlock and open the app, and nothing was overwritten."
+    }
+
+    /// Retry a load that failed only because the device was locked. Safe to call on
+    /// every foreground transition: it does nothing unless a read actually failed.
+    func reloadIfUnreadable() {
+        guard !didLoadCleanly else { return }
+        load()
+        if didLoadCleanly { dataRecoveryMessage = nil }
     }
 
     private func apply(_ stored: StoredTodayData) {
@@ -238,6 +290,10 @@ final class TodayStore: ObservableObject {
     private func persist(syncAfterSave: Bool = false) {
         pendingPersistTask?.cancel()
         pendingPersistTask = nil
+        // Never let an in-memory state we could not verify overwrite the file on
+        // disk. Without this, one locked-device background launch silently replaced
+        // the real archive with an empty one.
+        guard didLoadCleanly else { return }
         let value = StoredTodayData(
             weights: weights,
             workouts: workouts,
@@ -262,7 +318,11 @@ final class TodayStore: ObservableObject {
                 syncService.scheduleSync(snapshot: value, catalog: .shared)
             }
         } catch {
+            // assertionFailure alone compiles out of Release, so on a real phone every
+            // failed save was invisible. Surface it, since HistoryView already shows
+            // this message.
             assertionFailure("Could not persist Today data: \(error)")
+            dataRecoveryMessage = "Today could not save your latest changes. They are still here in the app, and it will try again."
         }
     }
 

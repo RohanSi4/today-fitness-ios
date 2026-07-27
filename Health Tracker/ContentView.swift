@@ -90,6 +90,10 @@ struct ContentView: View {
             if phase != .active {
                 store.flushPersistence()
             } else {
+                // If a background launch happened while the phone was locked, the
+                // store came up empty and refused to write. Now that we are
+                // foreground the device is unlocked, so the real data can load.
+                store.reloadIfUnreadable()
                 Task {
                     async let runs: Void = runService.refresh()
                     async let plan: Void = planService.refresh()
