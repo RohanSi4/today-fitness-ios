@@ -3,6 +3,16 @@ import Testing
 @testable import Health_Tracker
 
 struct WeightChartScaleTests {
+    /// The two span assertions below originally compared against
+    /// `WeightChartScale.minimumSpan` itself, which meant the assertion moved
+    /// with the constant and could never fail when the constant changed. Tuning
+    /// minimumSpan down to 0.5 silently removed the flat-week protection with
+    /// every test still green. Pin the number here so a change to it is a
+    /// deliberate edit to this test rather than an invisible regression.
+    @Test func theMinimumSpanIsEightPounds() {
+        #expect(WeightChartScale.minimumSpan == 8)
+    }
+
     @Test func aMonthOfRealMorningsStaysZoomedIntoTheRange() throws {
         let mornings = [184.4, 184.1, 183.9, 183.2, 182.8, 182.4, 181.9, 181.6, 180.8, 180.2]
 
@@ -32,7 +42,7 @@ struct WeightChartScaleTests {
 
         let domain = try #require(WeightChartScale.domain(for: flat, goal: 178.5))
 
-        #expect(domain.upperBound - domain.lowerBound >= WeightChartScale.minimumSpan)
+        #expect(domain.upperBound - domain.lowerBound >= 8)
         #expect(flat.allSatisfy { domain.contains($0) })
     }
 
@@ -64,7 +74,7 @@ struct WeightChartScaleTests {
         let domain = try #require(WeightChartScale.domain(for: [184.4], goal: 184.4))
 
         #expect(domain.contains(184.4))
-        #expect(domain.upperBound - domain.lowerBound >= WeightChartScale.minimumSpan)
+        #expect(domain.upperBound - domain.lowerBound >= 8)
         #expect(domain.lowerBound > 150)
     }
 
