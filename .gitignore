@@ -6,3 +6,8 @@ xcuserdata/
 web/.next/
 web/node_modules/
 web/out/
+
+# Agent worktrees and local session state. Never commit these: a stray
+# `git add -A` during a multi-agent session would otherwise commit whole
+# checkouts of the repo into itself.
+.claude/
