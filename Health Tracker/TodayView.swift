@@ -25,12 +25,18 @@ struct TodayView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 header
+                // The session comes first. Logging a weight is a five-second
+                // chore and it used to sit above the plan, so the one thing the
+                // app exists to tell him was the third thing on screen and
+                // "Start workout" was below three cards of scrolling.
                 if store.activeWorkout != nil {
                     workoutCard
                 }
-                weightPrompt
                 planCard
-                stretchesCard
+                if store.activeWorkout == nil {
+                    workoutCard
+                }
+                quickTiles
                 NavigationLink {
                     WeeklySnapshotView(
                         store: store,
@@ -44,9 +50,6 @@ struct TodayView: View {
                     )
                 }
                 .buttonStyle(.plain)
-                if store.activeWorkout == nil {
-                    workoutCard
-                }
                 if day?.isRestOnly == true {
                     RecoveryPreviewCard()
                 }
@@ -73,86 +76,115 @@ struct TodayView: View {
             Text(headerContext)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+            if !progressChips.isEmpty {
+                HStack(spacing: 8) {
+                    ForEach(progressChips, id: \.title) { chip in
+                        Label(chip.title, systemImage: chip.done ? "checkmark.circle.fill" : chip.symbol)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(chip.done ? Color.green : TodayPalette.accent)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background((chip.done ? Color.green : TodayPalette.accent).opacity(0.12), in: Capsule())
+                    }
+                }
+                .padding(.top, 4)
+                .accessibilityElement(children: .combine)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// What today asks for and whether it is done, readable without scrolling.
+    /// The weekly card already knew all of this but sat below three other cards.
+    private var progressChips: [(title: String, symbol: String, done: Bool)] {
+        var chips: [(String, String, Bool)] = []
+        if let miles = day?.plannedRunMiles {
+            chips.append(("\(formatMiles(miles)) mi", "figure.run", todayProgress?.runCompleted == true))
+        }
+        if let kind = day?.workoutKind {
+            chips.append((kind.title, "dumbbell.fill", todayProgress?.liftCompleted == true))
+        }
+        return chips
+    }
+
     private var headerContext: String {
         if let active = store.activeWorkout {
-            return "\(active.kind.title) in progress · keep the next set simple"
-        }
-        if todayProgress?.isFullyComplete == true {
-            return "Plan complete · recovery and tomorrow are already in view"
+            return "\(active.kind.title) in progress"
         }
         if day?.isRestOnly == true {
             return "Recovery day · keep movement easy"
         }
-        if let kind = day?.workoutKind {
-            return "\(kind.title) is on deck"
+        // Name what is still owed. The old fallback ("Your plan, training, and
+        // recovery context") fired on every run-only day — which is most days —
+        // and told him nothing he could act on.
+        var remaining: [String] = []
+        if day?.plannedRunMiles != nil, todayProgress?.runCompleted != true { remaining.append("run") }
+        if day?.workoutKind != nil, todayProgress?.liftCompleted != true { remaining.append("lift") }
+        if !remaining.isEmpty {
+            return "\(remaining.joined(separator: " and ")) still to do".capitalizedFirst
         }
-        return "Your plan, training, and recovery context"
+        return day == nil ? "Nothing planned · start any workout below" : "Everything is checked off"
     }
 
-    private var weightPrompt: some View {
-        Button {
-            appState.presentedSheet = .weight
-        } label: {
-            HStack(spacing: 14) {
-                Image(systemName: store.todayWeight == nil ? "scalemass.fill" : "checkmark.circle.fill")
-                    .font(.title2)
-                    .foregroundStyle(store.todayWeight == nil ? TodayPalette.accent : .green)
-                    .frame(width: 44, height: 44)
-                    .background(TodayPalette.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 13))
+    /// Weight and stretches are both one-tap side errands, and each was taking a
+    /// full-width card with a headline and a subtitle — together roughly a third
+    /// of the first screen. Two-up tiles keep them one tap away while making it
+    /// obvious they are not the session.
+    private var quickTiles: some View {
+        HStack(spacing: 12) {
+            quickTile(
+                title: store.todayWeight == nil ? "Log weight" : "Weight logged",
+                subtitle: store.todayWeight == nil ? "Morning · private" : "Done for today",
+                symbol: store.todayWeight == nil ? "scalemass.fill" : "checkmark.circle.fill",
+                tint: store.todayWeight == nil ? TodayPalette.accent : .green,
+                identifier: "log-weight-button"
+            ) {
+                appState.presentedSheet = .weight
+            }
 
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(store.todayWeight == nil ? "Log morning weight" : "Morning weight logged")
-                        .font(.headline)
-                    Text(store.todayWeight == nil ? "Private and saved to Apple Health" : "Done for today")
-                        .font(.caption)
+            quickTile(
+                title: "Stretches",
+                subtitle: suggestedStretchPhase == .cooldown ? "Cool down" : "Warm up",
+                symbol: suggestedStretchPhase.symbol,
+                tint: TodayPalette.warm,
+                identifier: "stretches-button"
+            ) {
+                appState.presentedSheet = .stretch(phase: suggestedStretchPhase)
+            }
+        }
+    }
+
+    private func quickTile(
+        title: String,
+        subtitle: String,
+        symbol: String,
+        tint: Color,
+        identifier: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 10) {
+                Image(systemName: symbol)
+                    .font(.title3)
+                    .foregroundStyle(tint)
+                    .frame(width: 38, height: 38)
+                    .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                    Text(subtitle)
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.tertiary)
             }
-            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(14)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .todayCard()
-        .accessibilityIdentifier("log-weight-button")
-    }
-
-    private var stretchesCard: some View {
-        Button {
-            appState.presentedSheet = .stretch(phase: suggestedStretchPhase)
-        } label: {
-            HStack(spacing: 14) {
-                Image(systemName: suggestedStretchPhase.symbol)
-                    .font(.title2)
-                    .foregroundStyle(TodayPalette.warm)
-                    .frame(width: 44, height: 44)
-                    .background(TodayPalette.warm.opacity(0.12), in: RoundedRectangle(cornerRadius: 13))
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Stretches")
-                        .font(.headline)
-                    Text(suggestedStretchPhase == .cooldown ? "Cool down after today’s run" : "Warm up before your run, cool down after")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(16)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .todayCard()
-        .accessibilityIdentifier("stretches-button")
+        .accessibilityIdentifier(identifier)
+        .accessibilityLabel("\(title). \(subtitle)")
     }
 
     @ViewBuilder
