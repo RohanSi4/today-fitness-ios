@@ -90,6 +90,101 @@ enum ExerciseLoadMode: String, Codable {
     }
 }
 
+/// The kind of hardware a movement is performed on.
+///
+/// This is the axis that decides whether the *brand* of the equipment changes the
+/// number you write down. Cam profiles, lever-arm lengths, pulley ratios, and stack
+/// increments are brand-specific, so 150 on a Life Fitness pulldown is simply not the
+/// same load as 150 on a Hammer Strength pulldown. A 45 lb barbell weighs 45 lb
+/// everywhere and a 50 lb dumbbell weighs 50 lb everywhere, so for those the brand is
+/// decoration and recording it would only fragment history for no benefit.
+enum EquipmentClass: String, Codable, CaseIterable, Sendable {
+    case selectorized
+    case plateLoaded
+    case cable
+    case smith
+    case barbell
+    case dumbbell
+    case bodyweight
+    case other
+
+    /// Whether the same nominal weight means a different load depending on the maker.
+    var brandChangesTheLoad: Bool {
+        switch self {
+        case .selectorized, .plateLoaded, .cable, .smith: true
+        case .barbell, .dumbbell, .bodyweight, .other: false
+        }
+    }
+}
+
+/// A manufacturer of gym equipment.
+///
+/// The raw value is the slug used inside a brand-qualified exercise id, so it has to
+/// stay stable forever: it is part of the key that logged history is stored under.
+enum EquipmentBrand: String, Codable, CaseIterable, Identifiable, Sendable {
+    case lifeFitness = "life-fitness"
+    case hammerStrength = "hammer-strength"
+    case cybex = "cybex"
+    case technogym = "technogym"
+    case precor = "precor"
+    case nautilus = "nautilus"
+    case matrix = "matrix"
+    case bodySolid = "body-solid"
+    case rogue = "rogue"
+    case eleiko = "eleiko"
+    case atlantis = "atlantis"
+    case arsenal = "arsenal"
+    case prime = "prime"
+    case panatta = "panatta"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .lifeFitness: "Life Fitness"
+        case .hammerStrength: "Hammer Strength"
+        case .cybex: "Cybex"
+        case .technogym: "Technogym"
+        case .precor: "Precor"
+        case .nautilus: "Nautilus"
+        case .matrix: "Matrix"
+        case .bodySolid: "Body-Solid"
+        case .rogue: "Rogue"
+        case .eleiko: "Eleiko"
+        case .atlantis: "Atlantis"
+        case .arsenal: "Arsenal Strength"
+        case .prime: "PRIME"
+        case .panatta: "Panatta"
+        }
+    }
+
+    /// Which hardware categories this maker actually builds.
+    ///
+    /// Deliberately coarse. Claiming "Cybex makes exactly these 41 machines" would rot
+    /// the moment a line is refreshed, and inventing model names is worse than being
+    /// vague. What is durable is the category: Rogue and Eleiko build bars, racks,
+    /// plate-loaded levers, and cable towers but no pin-loaded stack line, while
+    /// Life Fitness sells its plate-loaded product under the Hammer Strength name.
+    var manufactures: Set<EquipmentClass> {
+        switch self {
+        case .lifeFitness: [.selectorized, .cable]
+        case .hammerStrength: [.plateLoaded, .selectorized, .cable, .smith]
+        case .cybex: [.selectorized, .plateLoaded, .cable]
+        case .technogym: [.selectorized, .plateLoaded, .cable]
+        case .precor: [.selectorized, .plateLoaded, .cable]
+        case .nautilus: [.selectorized, .plateLoaded, .cable]
+        case .matrix: [.selectorized, .plateLoaded, .cable, .smith]
+        case .bodySolid: [.selectorized, .plateLoaded, .cable, .smith]
+        case .rogue: [.plateLoaded, .cable]
+        case .eleiko: [.plateLoaded, .cable]
+        case .atlantis: [.selectorized, .plateLoaded, .cable]
+        case .arsenal: [.plateLoaded, .selectorized, .cable, .smith]
+        case .prime: [.selectorized, .plateLoaded]
+        case .panatta: [.selectorized, .plateLoaded, .cable, .smith]
+        }
+    }
+}
+
 enum MuscleGroup: String, Codable, CaseIterable, Identifiable {
     case upperChest
     case middleChest
@@ -170,6 +265,8 @@ struct MuscleContribution: Codable, Hashable {
 }
 
 struct ExerciseDefinition: Codable, Hashable, Identifiable {
+    /// Either a plain catalog id (`lat-pulldown`) or a brand-qualified one
+    /// (`lat-pulldown@hammer-strength`). See ``qualifiedID(base:brand:)``.
     let id: String
     let name: String
     let aliases: [String]
@@ -177,9 +274,101 @@ struct ExerciseDefinition: Codable, Hashable, Identifiable {
     let loadMode: ExerciseLoadMode
     let weightIncrement: Double
     let muscles: [MuscleContribution]
+    /// What the movement is performed on. Decides whether brand is a meaningful axis.
+    let equipmentClass: EquipmentClass
+    /// Nil on the generic catalog row. Set on a brand-qualified instance, and on the
+    /// handful of movements where the maker *is* the movement (a Hammer Strength
+    /// Iso-Lateral Row is not a generic seated row with a sticker on it).
+    let brand: EquipmentBrand?
+    /// True when brand is baked into the movement itself and cannot be re-selected.
+    let isBrandSignature: Bool
+
+    init(
+        id: String,
+        name: String,
+        aliases: [String],
+        equipment: String,
+        loadMode: ExerciseLoadMode,
+        weightIncrement: Double,
+        muscles: [MuscleContribution],
+        equipmentClass: EquipmentClass = .other,
+        brand: EquipmentBrand? = nil,
+        isBrandSignature: Bool = false
+    ) {
+        self.id = id
+        self.name = name
+        self.aliases = aliases
+        self.equipment = equipment
+        self.loadMode = loadMode
+        self.weightIncrement = weightIncrement
+        self.muscles = muscles
+        self.equipmentClass = equipmentClass
+        self.brand = brand
+        self.isBrandSignature = isBrandSignature
+    }
+
+    /// Tolerant of payloads written before equipment class and brand existed.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        aliases = try container.decodeIfPresent([String].self, forKey: .aliases) ?? []
+        equipment = try container.decodeIfPresent(String.self, forKey: .equipment) ?? "other"
+        loadMode = try container.decodeIfPresent(ExerciseLoadMode.self, forKey: .loadMode) ?? .total
+        weightIncrement = try container.decodeIfPresent(Double.self, forKey: .weightIncrement) ?? 5
+        muscles = try container.decodeIfPresent([MuscleContribution].self, forKey: .muscles) ?? []
+        equipmentClass = try container.decodeIfPresent(EquipmentClass.self, forKey: .equipmentClass) ?? .other
+        brand = try container.decodeIfPresent(EquipmentBrand.self, forKey: .brand)
+        isBrandSignature = try container.decodeIfPresent(Bool.self, forKey: .isBrandSignature) ?? false
+    }
 
     var searchText: String {
-        ([name, equipment] + aliases).joined(separator: " ").lowercased()
+        ([name, equipment] + aliases + [brand?.title].compactMap { $0 })
+            .joined(separator: " ")
+            .lowercased()
+    }
+
+    /// The generic movement behind a brand-qualified instance.
+    var baseID: String { Self.components(of: id).base }
+
+    /// Whether a brand can be attached to this movement when logging it.
+    var acceptsBrand: Bool { !isBrandSignature && equipmentClass.brandChangesTheLoad }
+}
+
+extension ExerciseDefinition {
+    /// Brand is stored as a suffix on the logged exercise id rather than as a separate
+    /// field, and rather than as separate catalog rows per brand.
+    ///
+    /// Three options were on the table:
+    ///
+    /// 1. Bake the brand into the name and ship a row per brand. That is 250 movements
+    ///    times 14 makers, so searching "lat pulldown" buries the thing you wanted under
+    ///    a dozen near-identical rows. Rejected.
+    /// 2. Add a `brand` field to `LoggedExercise`. Correct in the abstract, but every
+    ///    history lookup in the app keys on the exercise id string, so each of those
+    ///    call sites would have to learn about brands or it would silently average a
+    ///    Hammer Strength row in with a Cybex row.
+    /// 3. Qualify the id: `seated-machine-row@hammer-strength`. The catalog stays one
+    ///    row per movement so search is unaffected, and because history is keyed by id,
+    ///    two brands of the same machine keep separate weight histories for free. That
+    ///    is exactly the property that matters, since 150 lb on two makers' stacks is
+    ///    not the same load.
+    ///
+    /// Option 3 is what is implemented. An id with no suffix means "unbranded", which is
+    /// what every already-logged set is, so nothing in existing history moves.
+    static let brandSeparator: Character = "@"
+
+    static func qualifiedID(base: String, brand: EquipmentBrand?) -> String {
+        guard let brand else { return base }
+        return "\(base)\(brandSeparator)\(brand.rawValue)"
+    }
+
+    static func components(of id: String) -> (base: String, brand: EquipmentBrand?) {
+        guard let index = id.lastIndex(of: brandSeparator) else { return (id, nil) }
+        let base = String(id[id.startIndex..<index])
+        let slug = String(id[id.index(after: index)...])
+        guard !base.isEmpty, let brand = EquipmentBrand(rawValue: slug) else { return (id, nil) }
+        return (base, brand)
     }
 }
 
@@ -198,6 +387,12 @@ struct LoggedExercise: Codable, Hashable, Identifiable {
     var id = UUID()
     let exerciseID: String
     var sets: [LoggedSet]
+
+    /// The movement, ignoring which maker's version of it was used.
+    var baseExerciseID: String { ExerciseDefinition.components(of: exerciseID).base }
+
+    /// The maker of the machine this was logged on, if one was recorded.
+    var brand: EquipmentBrand? { ExerciseDefinition.components(of: exerciseID).brand }
 
     mutating func removeOneSet() {
         guard sets.count > 1 else { return }
