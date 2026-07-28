@@ -265,6 +265,20 @@ struct ExerciseCatalogCoverageTests {
         #expect(catalog.exercises.count(where: { $0.equipmentClass == .bodyweight }) >= 10)
     }
 
+    /// The exact size of the hand-mapped catalog, because that number is quoted
+    /// off-repo — on the project page, on the Today card, and on a resume — and
+    /// nothing connected those copies to the source. It was published as 252
+    /// while the file held 255. A `>= 200` floor cannot catch that kind of drift.
+    /// If you add exercises, update this number and the places listed above.
+    @Test func theHandMappedCatalogIsExactlyTheAdvertisedSize() {
+        let catalog = ExerciseCatalog(cacheURL: temporaryURL("count"))
+
+        #expect(catalog.exercises.count == 255)
+        // Ids are permanent and history is keyed by them, so a collision would
+        // silently merge two movements' logs.
+        #expect(Set(catalog.exercises.map(\.id)).count == catalog.exercises.count)
+    }
+
     @Test func everyMuscleGroupInTheAnatomyViewIsReachable() {
         let catalog = ExerciseCatalog(cacheURL: temporaryURL("anatomy"))
         let covered = Set(catalog.exercises.flatMap { $0.muscles.map(\.muscle) })

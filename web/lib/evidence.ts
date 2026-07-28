@@ -94,7 +94,7 @@ export const evidenceClaims: EvidenceClaim[] = [
     sources: [
       {
         title: "Failure versus non-failure resistance training",
-        detail: "Systematic review and meta-analysis, 2026",
+        detail: "Wu et al., BMC Sports Science, Medicine and Rehabilitation, 2026",
         href: "https://pubmed.ncbi.nlm.nih.gov/42410632/",
       },
       {
@@ -127,15 +127,15 @@ export const evidenceClaims: EvidenceClaim[] = [
     level: "Heuristic",
     title: "Sleep context is useful; a readiness score is not a diagnosis",
     summary:
-      "Sleep loss can impair performance and recovery-related outcomes, but consumer sleep estimates cannot determine whether a specific workout will be productive.",
+      "Sleep loss can impair muscle strength, but consumer sleep estimates cannot determine whether a specific workout will be productive.",
     todayUse:
       "Today describes sleep duration and consistency as context, then asks you to combine it with soreness, motivation, illness, and warm-up performance.",
     limit:
       "The in-app sleep signal is a transparent heuristic, not a validated clinical or readiness measure.",
     sources: [
       {
-        title: "Sleep loss and physical performance meta-analysis",
-        detail: "Systematic review and meta-analysis, 2025",
+        title: "Sleep loss or deprivation and muscle strength",
+        detail: "Easow et al., systematic review, Sleep and Breathing, 2025",
         href: "https://pubmed.ncbi.nlm.nih.gov/40663194/",
       },
     ],

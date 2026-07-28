@@ -215,7 +215,7 @@ struct InsightsView: View {
                     .background(TodayPalette.muscle.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Hypertrophy plan").font(.headline)
-                    Text("Low-fatigue Upper / Lower with movement-specific 4–12 rep targets")
+                    Text("Low-fatigue Upper / Lower with movement-specific 5–20 rep targets")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

@@ -41,8 +41,8 @@ enum FitnessEvidence {
     static let sources: [FitnessResearchSource] = [
         .init(
             id: "acsm-2026",
-            title: "Resistance Training Prescription for Muscle Function, Hypertrophy, and Physical Performance",
-            citation: "ACSM position stand · Medicine & Science in Sports & Exercise · 2026",
+            title: "Resistance Training Prescription for Muscle Function, Hypertrophy, and Physical Performance in Healthy Adults: An Overview of Reviews",
+            citation: "Currier et al. · ACSM position stand · Medicine & Science in Sports & Exercise · 2026",
             url: URL(string: "https://doi.org/10.1249/MSS.0000000000003897")!
         ),
         .init(
@@ -65,8 +65,8 @@ enum FitnessEvidence {
         ),
         .init(
             id: "failure-2026",
-            title: "Failure Versus Non-Failure Resistance Training",
-            citation: "Systematic review and meta-analysis · 2026",
+            title: "Resistance Training Performed to Repetition Non-Failure and Exercise Performance",
+            citation: "Wu et al. · BMC Sports Science, Medicine and Rehabilitation · 2026",
             url: URL(string: "https://pubmed.ncbi.nlm.nih.gov/42410632/")!
         ),
         .init(
@@ -90,7 +90,7 @@ enum FitnessEvidence {
         .init(
             id: "concurrent-2022",
             title: "Concurrent Aerobic and Strength Training and Muscle Fiber Hypertrophy",
-            citation: "Systematic review and meta-analysis · Sports Medicine · 2022",
+            citation: "Lundberg et al. · Sports Medicine · 2022",
             url: URL(string: "https://pmc.ncbi.nlm.nih.gov/articles/PMC9474354/")!
         ),
         .init(
@@ -108,7 +108,7 @@ enum FitnessEvidence {
         .init(
             id: "sleep-2025",
             title: "Sleep Loss or Sleep Deprivation and Muscle Strength",
-            citation: "Systematic review · Sleep and Breathing · 2025",
+            citation: "Easow et al. · Systematic review · Sleep and Breathing · 2025",
             url: URL(string: "https://pubmed.ncbi.nlm.nih.gov/40663194/")!
         ),
     ]
@@ -184,9 +184,9 @@ enum FitnessEvidence {
             id: "nutrition",
             topic: "Nutrition",
             title: "Protein and creatine are supported; neither replaces training",
-            summary: "Protein intake around 1.6 g/kg/day captures most average resistance-training benefit, while creatine paired with training can improve strength and lean-mass outcomes.",
+            summary: "Protein intake around 1.6 g/kg/day captures most average resistance-training benefit, while creatine paired with training can improve upper- and lower-body strength.",
             application: "Today treats these as high-value fundamentals to discuss, not as required supplements or a substitute for adequate food, progressive training, and sleep.",
-            limits: "Protein needs vary with energy intake and goals. Creatine changes water content and body mass; supplement quality and individual medical context still matter.",
+            limits: "Protein needs vary with energy intake and goals. The creatine review measured strength, not lean mass, and its significant gains came from a sample that was almost entirely male. Creatine also changes water content and body mass; supplement quality and individual medical context still matter.",
             confidence: .strong,
             symbol: "fork.knife",
             sourceIDs: ["protein-2018", "creatine-2024"]
