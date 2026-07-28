@@ -91,6 +91,36 @@ final class ScreenshotWalkthrough: XCTestCase {
         shoot(app, "14-history")
     }
 
+    /// The weight field, which is the control touched most in a session and the
+    /// one place a screenshot cannot tell you whether typing still works. Needs
+    /// a seeded active workout: see tools/seed-active-workout.sh.
+    @MainActor
+    func testWeightFieldAcceptsADecimalAndShowsAPlaceholderWhenUnset() throws {
+        let app = launched()
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 10))
+        dismissHealthSheet(deny: true, timeout: 4)
+
+        let resume = app.buttons["resume-workout-button"]
+        try XCTSkipUnless(resume.waitForExistence(timeout: 5), "No active workout seeded")
+        resume.tap()
+        XCTAssertTrue(app.buttons["close-workout-button"].waitForExistence(timeout: 5))
+        Thread.sleep(forTimeInterval: 1.5)
+        shoot(app, "15-weight-field")
+
+        // An unset weight is an empty field, not a literal 0.
+        let unset = app.textFields["Pec deck, set 1, weight"]
+        XCTAssertTrue(unset.waitForExistence(timeout: 5))
+        XCTAssertEqual(unset.value as? String, "0", "empty field should fall back to the placeholder")
+
+        // And a decimal survives being typed, which is what the old
+        // value-bound field could not do.
+        unset.tap()
+        unset.typeText("12.5")
+        Thread.sleep(forTimeInterval: 1)
+        XCTAssertEqual(unset.value as? String, "12.5")
+        shoot(app, "16-weight-field-typed")
+    }
+
     @MainActor
     func testCaptureTheChangedScreens() throws {
         let app = launched()
