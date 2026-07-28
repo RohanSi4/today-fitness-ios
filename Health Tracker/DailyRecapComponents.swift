@@ -44,9 +44,9 @@ struct RecapHeroCard: View {
 
     private var scoreLabel: String {
         switch recap.sleep.score {
-        case 85...: "Well recovered"
-        case 70...: "Solid foundation"
-        default: "Prioritize recovery"
+        case 85...: "Sleep looked supportive"
+        case 70...: "Sleep was near your baseline"
+        default: "Sleep opportunity was lower"
         }
     }
 
@@ -129,7 +129,7 @@ private struct SleepScoreRing: View {
             VStack(spacing: 0) {
                 Text("\(score)")
                     .font(.system(.title, design: .rounded, weight: .bold))
-                Text("SCORE")
+                Text("SIGNAL")
                     .font(.system(size: 9, weight: .bold))
                     .tracking(0.8)
                     .opacity(0.72)
@@ -138,8 +138,8 @@ private struct SleepScoreRing: View {
         }
         .frame(width: 104, height: 104)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Sleep score")
-        .accessibilityValue("\(score) out of 100")
+        .accessibilityLabel("Today sleep estimate")
+        .accessibilityValue("\(score) out of 100, an app heuristic")
     }
 }
 

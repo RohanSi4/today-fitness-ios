@@ -308,15 +308,15 @@ enum DailyRecapInsight {
         case (..<(-0.05), 0.08..., _):
             return "Sleep was lighter than usual, but your movement still finished above average."
         case (0.05..., _, ..<(-0.08)):
-            return "You slept more than usual; a lighter movement day may have helped recovery."
+            return "You slept more than usual and moved less than your recent average."
         case (..<(-0.05), _, ..<(-0.08)):
-            return "Sleep and movement were both below baseline, so consider an easier recovery day."
+            return "Sleep and movement were below your recent baseline. Check soreness, motivation, and warm-up performance before deciding today’s training."
         case (0.05..., 0.08..., _):
             return "Strong balance: both sleep and movement finished above your recent baseline."
         case (_, 0.08..., _):
             return "Movement was the standout, finishing above your seven-day baseline."
         case (_, _, ..<(-0.08)):
-            return "Movement was below your recent baseline; a short walk could reset today."
+            return "Movement was below your recent baseline. If you feel up to it, a short easy walk is one way to add movement."
         default:
             return "Your sleep and movement stayed close to their seven-day baselines."
         }

@@ -23,7 +23,7 @@ struct DailyRecapView: View {
                     .ignoresSafeArea()
                 stateContent
             }
-            .navigationTitle("Health Recap")
+            .navigationTitle("Sleep recap")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { recapToolbar }
         }
@@ -115,6 +115,7 @@ struct DailyRecapContentView: View {
             VStack(alignment: .leading, spacing: 18) {
                 RecapSourceBanner(source: source)
                 RecapHeroCard(recap: recap)
+                RecapEstimateNote()
                 RecapInsightCard(insight: recap.insight)
                 SleepDetailsCard(sleep: recap.sleep)
                 MovementSection(movement: recap.movement)
@@ -125,6 +126,34 @@ struct DailyRecapContentView: View {
         }
         .scrollIndicators(.hidden)
         .accessibilityIdentifier("daily-recap-scroll")
+    }
+}
+
+private struct RecapEstimateNote: View {
+    var body: some View {
+        NavigationLink {
+            ResearchLibraryView()
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "info.circle.fill")
+                    .foregroundStyle(RecapPalette.accent)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Today estimate—not a readiness score")
+                        .font(.subheadline.weight(.semibold))
+                    Text("Use the trend as context alongside soreness, warm-up performance, illness, and life stress.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(16)
+        }
+        .buttonStyle(.plain)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20))
     }
 }
 
