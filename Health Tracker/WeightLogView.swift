@@ -63,6 +63,21 @@ struct WeightLogView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
+                // Saving replaces whatever is already on that day. Silently
+                // overwriting a reading you had forgotten about is exactly how a
+                // backdated correction turns into lost history.
+                if let existing = existingEntry {
+                    Label(
+                        "Replaces \(existing.pounds.formatted(.number.precision(.fractionLength(1)))) lb "
+                            + "already logged for \(existing.date.formatted(.dateTime.weekday(.abbreviated).month().day()))",
+                        systemImage: "arrow.triangle.2.circlepath"
+                    )
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+
                 if let errorMessage {
                     Text(errorMessage)
                         .font(.footnote)
@@ -101,13 +116,28 @@ struct WeightLogView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }
                 }
+                // The decimal pad has no return key, so without this the only
+                // way out of the field was to tap something else on the sheet.
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { isWeightFieldFocused = false }
+                        .fontWeight(.semibold)
+                }
             }
         }
         .presentationDetents([.medium, .large])
     }
 
+    /// The reading this save would replace, if any.
+    private var existingEntry: WeightEntry? {
+        store.weights.first { Calendar.current.isDate($0.date, inSameDayAs: date) }
+    }
+
     private func adjustmentButton(_ label: String, amount: Double) -> some View {
         Button(label) {
+            // A half-typed number in the field has not reached `value` yet, so
+            // nudging would silently discard it.
+            isWeightFieldFocused = false
             withAnimation(.snappy) {
                 value = ((value + amount) * 10).rounded() / 10
             }
@@ -118,6 +148,13 @@ struct WeightLogView: View {
     }
 
     private func save() async {
+        // A formatted TextField only writes its parsed value back to the binding
+        // when editing ends. Tapping Save straight from the keyboard could
+        // therefore store yesterday's number instead of the one on screen.
+        isWeightFieldFocused = false
+        dismissKeyboard()
+        await Task.yield()
+
         isSaving = true
         errorMessage = nil
         defer { isSaving = false }

@@ -70,10 +70,15 @@ struct InsightsView: View {
                     Text("lb").foregroundStyle(.secondary)
                     Spacer()
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text("\(max(0, latest.pounds - store.goalWeight).formatted(.number.precision(.fractionLength(1)))) lb")
+                        Text(goalGapValue(from: latest.pounds))
                             .font(.headline.monospacedDigit())
-                        Text("to 175").font(.caption).foregroundStyle(.secondary)
+                        // Read the goal instead of hard-coding it, so this cannot
+                        // quietly disagree with the dashed line on the chart.
+                        Text(goalGapCaption(from: latest.pounds))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
+                    .accessibilityElement(children: .combine)
                 }
 
                 if let average = store.sevenDayAverage {
@@ -83,7 +88,7 @@ struct InsightsView: View {
                     insightRow("30-day change", "\(change.formatted(.number.sign(strategy: .always()).precision(.fractionLength(1)))) lb")
                 }
 
-                if weightChartEntries.count >= 2 {
+                if weightChartEntries.count >= 2, let domain = weightChartDomain {
                     Chart {
                         ForEach(weightChartEntries) { entry in
                             LineMark(
@@ -104,15 +109,38 @@ struct InsightsView: View {
                             .foregroundStyle(.secondary.opacity(0.5))
                             .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
                     }
+                    // Without this Swift Charts anchors the domain at zero and
+                    // rounds out to 200, so a month of real mornings reads as a
+                    // flat line in the top tenth of the card.
+                    .chartYScale(domain: domain)
                     .chartXAxis(.hidden)
                     .chartYAxis {
-                        AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) {
-                            AxisValueLabel()
+                        // Four marks rather than three: now that the window is a
+                        // dozen pounds instead of two hundred, the extra
+                        // gridline is worth reading.
+                        AxisMarks(position: .leading, values: .automatic(desiredCount: 4)) { mark in
+                            if let pounds = mark.as(Double.self) {
+                                AxisValueLabel {
+                                    Text(pounds.formatted(.number.precision(.fractionLength(0))))
+                                }
+                            }
                             AxisGridLine().foregroundStyle(.secondary.opacity(0.12))
                         }
                     }
-                    .frame(height: 135)
+                    .frame(height: 150)
+                    .accessibilityElement(children: .ignore)
                     .accessibilityLabel("Body weight trend for the last 30 days")
+                    .accessibilityValue(weightTrendDescription)
+
+                    if clippedEntryCount > 0 {
+                        Text(
+                            clippedEntryCount == 1
+                                ? "One reading sits outside this range. Log that day again to correct it."
+                                : "\(clippedEntryCount) readings sit outside this range. Log those days again to correct them."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(TodayPalette.warm)
+                    }
                 }
             } else {
                 Text("Log a few mornings and your trend will show here.")
@@ -288,32 +316,41 @@ struct InsightsView: View {
         return store.weights.filter { $0.date >= cutoff }.sorted { $0.date < $1.date }
     }
 
-    private var weeklyWorkouts: [WorkoutSession] {
-        let cutoff = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
-        return store.workouts.filter { $0.startedAt >= cutoff }
+    private var weightChartDomain: ClosedRange<Double>? {
+        WeightChartScale.domain(
+            for: weightChartEntries.map(\.pounds),
+            goal: store.goalWeight
+        )
     }
 
-    private var weeklySetCount: Int {
-        weeklyWorkouts.reduce(0) { $0 + $1.completedSetCount }
+    /// Readings the domain deliberately left out, almost always a mistyped entry.
+    private var clippedEntryCount: Int {
+        guard let domain = weightChartDomain else { return 0 }
+        return weightChartEntries.filter { !domain.contains($0.pounds) }.count
     }
 
-    private var weeklyMuscleCount: Int {
-        recentScores.filter { $0.value > 0 }.count
-    }
-
-    private func metric(value: Int, label: String) -> some View {
-        VStack(spacing: 3) {
-            Text("\(value)")
-                .font(.title2.monospacedDigit().weight(.bold))
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
+    private var weightTrendDescription: String {
+        guard let first = weightChartEntries.first, let last = weightChartEntries.last else {
+            return "No readings yet"
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 12)
-        .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
+        let change = last.pounds - first.pounds
+        let direction = change < -0.05 ? "down" : (change > 0.05 ? "up" : "level at")
+        let magnitude = abs(change) < 0.05
+            ? last.pounds.formatted(.number.precision(.fractionLength(1)))
+            : abs(change).formatted(.number.precision(.fractionLength(1)))
+        return "\(weightChartEntries.count) readings, \(direction) \(magnitude) pounds, "
+            + "now \(last.pounds.formatted(.number.precision(.fractionLength(1)))) pounds"
+    }
+
+    private func goalGapValue(from pounds: Double) -> String {
+        let gap = pounds - store.goalWeight
+        guard gap > 0.05 else { return "At goal" }
+        return "\(gap.formatted(.number.precision(.fractionLength(1)))) lb"
+    }
+
+    private func goalGapCaption(from pounds: Double) -> String {
+        let goal = store.goalWeight.formatted(.number.precision(.fractionLength(0...1)))
+        return pounds - store.goalWeight > 0.05 ? "to \(goal)" : "goal \(goal)"
     }
 
     private func insightRow(_ title: String, _ value: String) -> some View {

@@ -49,13 +49,14 @@ struct WeeklySnapshotView: View {
             }
 
             HStack(spacing: 10) {
-                weeklyMetric(
-                    value: "\(formatMiles(snapshot.completedMiles))/\(formatMiles(snapshot.prescribedMiles))",
-                    label: "miles"
+                StatTile(
+                    "\(formatMiles(snapshot.completedMiles))/\(formatMiles(snapshot.prescribedMiles))",
+                    "miles",
+                    style: .plain
                 )
-                weeklyMetric(value: "\(snapshot.completedRuns)", label: "runs")
-                weeklyMetric(value: "\(snapshot.completedLifts)", label: "lifts")
-                weeklyMetric(value: "\(snapshot.workingSets)", label: "sets")
+                StatTile(snapshot.completedRuns, "runs", style: .plain)
+                StatTile(snapshot.completedLifts, "lifts", style: .plain)
+                StatTile(snapshot.workingSets, "sets", style: .plain)
             }
 
             ProgressView(
@@ -162,19 +163,6 @@ struct WeeklySnapshotView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func weeklyMetric(value: String, label: String) -> some View {
-        VStack(spacing: 3) {
-            Text(value)
-                .font(.headline.monospacedDigit().weight(.bold))
-                .minimumScaleFactor(0.7)
-                .lineLimit(1)
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
     private func runTitle(_ day: WeeklyDaySnapshot) -> String {
         guard let miles = day.plannedRunMiles else {
             return day.run.map { "\(formatMiles($0.miles)) mi extra" } ?? "Rest"
@@ -205,10 +193,6 @@ struct WeeklySnapshotView: View {
 
     private var dateRange: String {
         "\(snapshot.startDate.formatted(.dateTime.month(.abbreviated).day())) to \(snapshot.endDate.formatted(.dateTime.month(.abbreviated).day()))"
-    }
-
-    private func formatMiles(_ value: Double) -> String {
-        value.formatted(.number.precision(.fractionLength(value.rounded() == value ? 0 : 1)))
     }
 }
 
@@ -268,8 +252,10 @@ struct WeeklySnapshotCard: View {
         if day.plannedRunMiles != nil || day.plannedLift != nil { return Color.secondary.opacity(0.3) }
         return TodayPalette.accent.opacity(0.25)
     }
+}
 
-    private func formatMiles(_ value: Double) -> String {
-        value.formatted(.number.precision(.fractionLength(value.rounded() == value ? 0 : 1)))
-    }
+/// Miles read as "5" or "5.1", never "5.0". Shared because the weekly card and
+/// the weekly detail both showed the same number and had their own copy.
+func formatMiles(_ value: Double) -> String {
+    value.formatted(.number.precision(.fractionLength(value.rounded() == value ? 0 : 1)))
 }
