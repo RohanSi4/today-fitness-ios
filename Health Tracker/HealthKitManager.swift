@@ -21,7 +21,7 @@ enum HealthKitError: Error, LocalizedError {
     }
 }
 
-protocol HealthDataProviding {
+protocol HealthDataProviding: Sendable {
     var isHealthDataAvailable: Bool { get }
     func requestAuthorization() async throws
     func fetchSleepSessions(start: Date, end: Date) async throws -> [SleepSession]
@@ -32,7 +32,7 @@ protocol HealthDataProviding {
     ) async throws -> [Date: Double]
 }
 
-protocol BodyWeightHealthStoring {
+protocol BodyWeightHealthStoring: Sendable {
     var isHealthDataAvailable: Bool { get }
     func requestBodyWeightAuthorization() async throws
     func saveBodyWeight(pounds: Double, date: Date) async throws -> UUID
@@ -266,6 +266,12 @@ final class HealthKitManager: HealthDataProviding, BodyWeightHealthStoring, Runn
                 return
             }
 
+            // HealthKit declares its completion handler as a plain `() -> Void`,
+            // so carrying it into this `Task` is a `sending` violation even
+            // though HealthKit's own contract is "call me exactly once, from
+            // wherever you finish". The unsafe shadow states that, and the
+            // `defer` is what guarantees the once.
+            nonisolated(unsafe) let completion = completion
             Task {
                 defer { completion() }
                 let now = Date()

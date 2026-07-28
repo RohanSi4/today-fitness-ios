@@ -85,17 +85,20 @@ final class DailyRecapViewModel: ObservableObject {
     }
 }
 
-struct DailyRecapBuilder {
+struct DailyRecapBuilder: Sendable {
     private let healthData: HealthDataProviding
     private let calendar: Calendar
-    private let now: () -> Date
+    // `@Sendable` so the builder itself can be `Sendable`. The injected
+    // clock is only ever `Date.init` in the app and a fixed stub in tests, so
+    // this constrains nothing that was actually being done.
+    private let now: @Sendable () -> Date
     private let mainSleepMinimum: TimeInterval = 3 * 3600
     private let recentWindow: TimeInterval = 18 * 3600
 
     init(
         healthData: HealthDataProviding,
         calendar: Calendar = .current,
-        now: @escaping () -> Date = Date.init
+        now: @escaping @Sendable () -> Date = Date.init
     ) {
         self.healthData = healthData
         self.calendar = calendar

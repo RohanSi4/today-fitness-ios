@@ -1,7 +1,7 @@
 import Foundation
 import UserNotifications
 
-protocol RecapNotificationScheduling {
+protocol RecapNotificationScheduling: Sendable {
     func requestAuthorization() async -> Bool
     func scheduleSleepHighlightIfAuthorized(
         wakeTime: Date,
@@ -10,7 +10,7 @@ protocol RecapNotificationScheduling {
     ) async
 }
 
-protocol WeightReminderScheduling {
+protocol WeightReminderScheduling: Sendable {
     func requestAuthorization() async -> Bool
     func scheduleWeightReminders(from date: Date, days: Int) async
     func cancelWeightReminders(for date: Date)

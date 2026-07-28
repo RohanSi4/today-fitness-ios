@@ -604,6 +604,24 @@ struct WatchWorkoutTests {
         #expect(WatchWorkoutService.runMiles(from: "Rest + upper body lift") == nil)
     }
 
+    /// A fragment of a longer number is not a distance.
+    ///
+    /// The old pattern let the engine backtrack into the middle of one:
+    /// "100.1 miles" came back as 1.0 and "120.5 miles" as 5.0. Both are
+    /// plausible-looking values that would have gone to the Watch as a real
+    /// distance goal, which is the worst way for a parser to fail. Refusing the
+    /// match sends it down the "no safe distance goal" path instead.
+    @Test func aDistanceInsideALongerNumberIsRefusedRatherThanTruncated() {
+        #expect(WatchWorkoutService.runMiles(from: "100.1 miles") == nil)
+        #expect(WatchWorkoutService.runMiles(from: "120.5 miles") == nil)
+        #expect(WatchWorkoutService.runMiles(from: "100 mile run") == nil)
+        #expect(WatchWorkoutService.runMiles(from: "105 miles") == nil)
+        // The distances he actually runs are untouched.
+        #expect(WatchWorkoutService.runMiles(from: "26.2 mile race") == 26.2)
+        #expect(WatchWorkoutService.runMiles(from: "0.5 mile jog") == 0.5)
+        #expect(WatchWorkoutService.runMiles(from: "20 mile long run") == 20)
+    }
+
     @Test func indoorAndOutdoorPlansMapToTheRightWatchLocation() {
         #expect(WatchWorkoutService.location(from: "6 mile treadmill run") == .indoor)
         #expect(WatchWorkoutService.location(from: "6 mile run outdoors") == .outdoor)

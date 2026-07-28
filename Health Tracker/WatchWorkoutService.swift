@@ -1,8 +1,10 @@
 import Combine
 import CryptoKit
 import Foundation
+// No `import WorkoutKit`. Every WorkoutKit type now lives behind
+// `RunWorkoutScheduling`, and keeping the import out is what stops one from
+// leaking back into this main-actor class.
 import HealthKit
-import WorkoutKit
 
 enum WatchWorkoutState: Equatable {
     case idle
@@ -17,18 +19,23 @@ final class WatchWorkoutService: ObservableObject {
 
     @Published private(set) var state: WatchWorkoutState = .idle
 
-    private let scheduler: WorkoutScheduler
-    private let supported: () -> Bool
+    /// A `Sendable` façade rather than a `WorkoutScheduler`. WorkoutKit's
+    /// scheduler is not `Sendable` and all of its members are `nonisolated` and
+    /// `async`, so holding one in this `@MainActor` class meant the value had to
+    /// leave the main actor on every call - an error under the Swift 6 language
+    /// mode that `nonisolated(unsafe)` cannot fix, because the result types are
+    /// not `Sendable` either and so cannot come back.
+    ///
+    /// It also replaces the old `supported` closure: both answers now come from
+    /// the same object, so a test cannot set up the impossible combination of a
+    /// supported device with no scheduler behind it.
+    private let scheduler: any RunWorkoutScheduling
 
-    init(
-        scheduler: WorkoutScheduler = .shared,
-        supported: @escaping () -> Bool = { WorkoutScheduler.isSupported }
-    ) {
+    init(scheduler: any RunWorkoutScheduling = WorkoutKitRunScheduler()) {
         self.scheduler = scheduler
-        self.supported = supported
     }
 
-    var isSupported: Bool { supported() }
+    var isSupported: Bool { scheduler.isSupported }
 
     func send(_ day: TrainingPlanDay) async {
         guard let miles = day.plannedRunMiles, (0.1...100).contains(miles) else {
@@ -45,7 +52,7 @@ final class WatchWorkoutService: ObservableObject {
         }
 
         state = .sending(day.date)
-        let current = await scheduler.authorizationState
+        let current = await scheduler.authorizationState()
         let authorization = current == .notDetermined
             ? await scheduler.requestAuthorization()
             : current
@@ -54,33 +61,20 @@ final class WatchWorkoutService: ObservableObject {
             return
         }
 
-        let goal = WorkoutGoal.distance(miles, .miles)
         let location = Self.location(from: day.text)
-        guard SingleGoalWorkout.supportsGoal(
-            goal,
-            activity: .running,
-            location: location
-        ) else {
+        guard scheduler.supportsRun(miles: miles, location: location) else {
             state = .failed("Apple Watch does not support this run goal.")
             return
         }
 
-        let workout = SingleGoalWorkout(
-            activity: .running,
+        // The id is derived from the date, so sending the same day twice replaces
+        // the scheduled run instead of stacking a duplicate on his Watch.
+        let confirmed = await scheduler.replaceScheduledRun(
+            planID: Self.planID(for: day.date),
+            miles: miles,
             location: location,
-            goal: goal
+            at: date
         )
-        let plan = WorkoutPlan(.goal(workout), id: Self.planID(for: day.date))
-        let existing = await scheduler.scheduledWorkouts.filter { $0.plan.id == plan.id }
-        for item in existing {
-            await scheduler.remove(item.plan, at: item.date)
-        }
-        await scheduler.schedule(plan, at: date)
-
-        let confirmed = await scheduler.scheduledWorkouts.contains { item in
-            item.plan.id == plan.id && item.date.year == date.year
-                && item.date.month == date.month && item.date.day == date.day
-        }
         state = confirmed
             ? .scheduled(day.date)
             : .failed("Apple Watch did not confirm the scheduled run.")

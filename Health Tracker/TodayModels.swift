@@ -558,7 +558,13 @@ struct TrainingPlanDay: Codable, Identifiable, Hashable {
     }
 
     var plannedRunMiles: Double? {
-        let pattern = #"(?i)\b(\d{1,2}(?:\.\d{1,2})?)\s*(?:mile|miles|mi)\b"#
+        // The lookbehind is load-bearing. With a plain `\b` the engine could
+        // backtrack into the middle of a longer number and match a fragment of
+        // it: "100.1 miles" matched the trailing "1" and returned 1.0, and
+        // "120.5 miles" returned 5.0. That is worse than not parsing, because
+        // the value looks reasonable and goes straight to the Watch as a
+        // distance goal. Refusing to match makes it fail loudly instead.
+        let pattern = #"(?i)(?<![\d.])(\d{1,2}(?:\.\d{1,2})?)\s*(?:mile|miles|mi)\b"#
         guard let regex = try? NSRegularExpression(pattern: pattern),
               let match = regex.firstMatch(
                 in: text,

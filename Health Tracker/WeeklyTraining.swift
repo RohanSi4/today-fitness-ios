@@ -16,7 +16,7 @@ struct RunningWorkoutSummary: Codable, Equatable, Identifiable {
     }
 }
 
-protocol RunningWorkoutProviding {
+protocol RunningWorkoutProviding: Sendable {
     var isHealthDataAvailable: Bool { get }
     func requestWorkoutAuthorization() async throws
     func fetchRunningWorkouts(start: Date, end: Date) async throws -> [RunningWorkoutSummary]
