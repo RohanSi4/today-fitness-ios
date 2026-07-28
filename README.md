@@ -89,11 +89,34 @@ off by default. If I turn it on, the site gets the current number, 7-day average
 
 ## Exercise catalog and anatomy
 
-The searchable catalog builds on
+Today ships its own library of 252 exercises, so the catalog is complete with no
+network. It leans deliberately toward machines, cables, and their attachments, because
+that is what most of my sessions are made of, and every entry has a hand-written
+per-head muscle map.
+
+That bundled library is then topped up from
 [`yuhonas/free-exercise-db`](https://github.com/yuhonas/free-exercise-db), an Unlicense
-public-domain dataset with more than 800 exercises. Its muscle labels are deliberately
-treated as a search fallback because categories such as `arms` or `back` are not precise
-enough for the anatomy view.
+public-domain dataset with more than 800 exercises. The import only adds movements the
+bundled library does not already cover, matching on names and aliases with punctuation
+and plurals ignored so the list does not fill with near-duplicates. Its muscle labels
+are deliberately treated as a search fallback because categories such as `arms` or
+`back` are not precise enough for the anatomy view.
+
+### Machine brands
+
+The same number on two makers' machines is not the same load, so the brand is recorded
+rather than ignored. It is an attribute of a logged exercise, not a separate catalog
+row: choosing Cybex on a lat pulldown logs it under `lat-pulldown@cybex`, which keeps
+its own weight history and cannot be averaged in with the Hammer Strength one. The
+searchable list still has exactly one row per movement, so a brand never buries the lift
+you were looking for. Brands are offered for pin-loaded, plate-loaded, cable, and Smith
+work and withheld from barbell, dumbbell, and bodyweight movements, where a 45 lb bar is
+a 45 lb bar.
+
+A small number of machines are their own catalog entry because the maker *is* the
+movement: a Hammer Strength Iso-Lateral row does not share a movement path with a generic
+seated row. Those come from manufacturers' published product lines, and brands whose
+lineup is a set of otherwise generic movements get no such entries.
 
 Today adds a more detailed local mapping for the exercises that matter, including:
 

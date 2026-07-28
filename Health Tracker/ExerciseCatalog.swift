@@ -5,8 +5,15 @@ import Foundation
 final class ExerciseCatalog: ObservableObject {
     static let shared = ExerciseCatalog()
 
-    @Published private(set) var exercises: [ExerciseDefinition]
+    /// One row per movement. Brand-qualified variants are *not* in here: they are
+    /// derived on demand by ``exercise(id:)`` so that picking a machine brand never
+    /// multiplies the list you have to search through.
+    @Published private(set) var exercises: [ExerciseDefinition] {
+        didSet { rebuildIndex() }
+    }
     @Published private(set) var isLoading = false
+
+    private var byID: [String: ExerciseDefinition] = [:]
 
     private let cacheURL: URL
     private let session: URLSession
@@ -14,6 +21,8 @@ final class ExerciseCatalog: ObservableObject {
         string: "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/dist/exercises.json"
     )!
     private let maximumDownloadBytes = 12_000_000
+    /// How long a cached remote copy is trusted before another fetch is worth doing.
+    private let cacheLifetime: TimeInterval = 30 * 24 * 60 * 60
 
     init(session: URLSession = .shared, cacheURL: URL? = nil) {
         self.session = session
@@ -26,10 +35,15 @@ final class ExerciseCatalog: ObservableObject {
             merged = Self.merge(seed: merged, remote: remote)
         }
         exercises = merged.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        rebuildIndex()
     }
 
+    /// The old guard was `exercises.count < 100`, which worked only because the bundled
+    /// library was 21 entries: after one successful merge the count stayed above 100 and
+    /// the app never refreshed again. The bundled library is now well past 100 on its
+    /// own, so that guard would have meant "never fetch". Freshness is now what decides.
     func refreshIfNeeded() async {
-        guard exercises.count < 100, !isLoading else { return }
+        guard !isLoading, isCacheStale else { return }
         isLoading = true
         defer { isLoading = false }
 
@@ -46,12 +60,69 @@ final class ExerciseCatalog: ObservableObject {
             exercises = Self.merge(seed: Self.seedExercises, remote: remote)
                 .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         } catch {
-            // The personal seed library always remains available offline.
+            // The bundled library always remains available offline.
         }
     }
 
+    private var isCacheStale: Bool {
+        guard let modified = try? FileManager.default
+            .attributesOfItem(atPath: cacheURL.path)[.modificationDate] as? Date else {
+            return true
+        }
+        return Date().timeIntervalSince(modified) > cacheLifetime
+    }
+
+    /// Resolves both plain ids and brand-qualified ones (`lat-pulldown@cybex`).
+    ///
+    /// Derivation is deliberately permissive: if an id was ever logged with a brand it
+    /// keeps resolving even if that movement later stops offering brands, because the
+    /// alternative is orphaning real history.
     func exercise(id: String) -> ExerciseDefinition? {
-        exercises.first { $0.id == id }
+        if let match = byID[id] { return match }
+        let parts = ExerciseDefinition.components(of: id)
+        guard let brand = parts.brand, let base = byID[parts.base] else { return nil }
+        return Self.branded(base, brand: brand)
+    }
+
+    /// The makers worth offering for a movement, or an empty list when the brand would
+    /// be decoration. A 50 lb dumbbell is 50 lb whoever cast it, so free-weight and
+    /// bodyweight movements deliberately offer nothing.
+    func brands(for exerciseID: String) -> [EquipmentBrand] {
+        let base = ExerciseDefinition.components(of: exerciseID).base
+        guard let definition = byID[base], definition.acceptsBrand else { return [] }
+        return EquipmentBrand.allCases
+            .filter { $0.manufactures.contains(definition.equipmentClass) }
+            .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+    }
+
+    /// The id to log a set under once a brand has been chosen. Passing nil returns the
+    /// plain id, which is what every set logged before brands existed already uses.
+    func qualifiedID(for exerciseID: String, brand: EquipmentBrand?) -> String {
+        let base = ExerciseDefinition.components(of: exerciseID).base
+        guard let brand, let definition = byID[base], definition.acceptsBrand else { return base }
+        return ExerciseDefinition.qualifiedID(base: base, brand: brand)
+    }
+
+    private static func branded(_ base: ExerciseDefinition, brand: EquipmentBrand) -> ExerciseDefinition {
+        ExerciseDefinition(
+            id: ExerciseDefinition.qualifiedID(base: base.id, brand: brand),
+            // The brand goes in the name only on this derived instance, so history and
+            // the workout log read "Lat pulldown (Cybex)" without the searchable catalog
+            // ever growing a row per maker.
+            name: "\(base.name) (\(brand.title))",
+            aliases: base.aliases,
+            equipment: base.equipment,
+            loadMode: base.loadMode,
+            weightIncrement: base.weightIncrement,
+            muscles: base.muscles,
+            equipmentClass: base.equipmentClass,
+            brand: brand,
+            isBrandSignature: base.isBrandSignature
+        )
+    }
+
+    private func rebuildIndex() {
+        byID = Dictionary(exercises.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     }
 
     func search(_ query: String) -> [ExerciseDefinition] {
@@ -60,13 +131,50 @@ final class ExerciseCatalog: ObservableObject {
         let tokens = trimmed.split(separator: " ").map(String.init)
         return exercises
             .filter { exercise in tokens.allSatisfy { exercise.searchText.contains($0) } }
+            .map { ($0, Self.relevance($0, query: trimmed, tokens: tokens)) }
             .sorted { lhs, rhs in
-                let leftExact = lhs.name.lowercased().hasPrefix(trimmed)
-                let rightExact = rhs.name.lowercased().hasPrefix(trimmed)
-                if leftExact != rightExact { return leftExact }
-                return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+                if lhs.1 != rhs.1 { return lhs.1 > rhs.1 }
+                return lhs.0.name.localizedStandardCompare(rhs.0.name) == .orderedAscending
             }
+            .map(\.0)
     }
+
+    /// Ranking exists so that typing a generic movement surfaces the generic movement.
+    /// A maker-specific machine is a specialisation, so it sorts below the plain version
+    /// of the same lift, and imported rows sort below curated ones.
+    private static func relevance(
+        _ exercise: ExerciseDefinition,
+        query: String,
+        tokens: [String]
+    ) -> Int {
+        let name = exercise.name.lowercased()
+        let aliases = exercise.aliases.map { $0.lowercased() }
+        var score: Int
+        if name == query {
+            score = 100
+        } else if name.hasPrefix(query) {
+            score = 80
+        } else if aliases.contains(query) {
+            score = 70
+        } else if aliases.contains(where: { $0.hasPrefix(query) }) {
+            score = 60
+        } else if name.contains(query) {
+            score = 50
+        } else if tokens.allSatisfy({ name.contains($0) }) {
+            score = 40
+        } else {
+            score = 20
+        }
+        if exercise.isBrandSignature { score -= 25 }
+        if isImported(exercise) { score -= 5 }
+        return score
+    }
+
+    static func isImported(_ exercise: ExerciseDefinition) -> Bool {
+        exercise.id.hasPrefix(importedIDPrefix)
+    }
+
+    private static let importedIDPrefix = "free-exercise-db:"
 
     func defaultExerciseIDs(for kind: WorkoutKind) -> [String] {
         switch kind {
@@ -132,7 +240,7 @@ final class ExerciseCatalog: ObservableObject {
 
     func defaultSets(for exerciseID: String) -> [LoggedSet] {
         let values: (Double?, Int)
-        switch exerciseID {
+        switch ExerciseDefinition.components(of: exerciseID).base {
         case "machine-chest-fly": values = (235, 5)
         case "pull-up": values = (nil, 6)
         case "crunch": values = (nil, 12)
@@ -145,28 +253,61 @@ final class ExerciseCatalog: ObservableObject {
     }
 
     private static func merge(seed: [ExerciseDefinition], remote: [RemoteExercise]) -> [ExerciseDefinition] {
-        var byName = Dictionary(uniqueKeysWithValues: seed.map { ($0.name.lowercased(), $0) })
+        var merged = seed
+        // Dedupe on names *and* aliases, ignoring punctuation, so the import does not
+        // add "Pullups" next to the curated "Pull-up" and turn search into a list of
+        // near-identical rows.
+        var taken = Set<String>()
+        for exercise in seed {
+            taken.insert(normalizedKey(exercise.name))
+            for alias in exercise.aliases { taken.insert(normalizedKey(alias)) }
+        }
         for item in remote where item.category != "cardio" && item.category != "stretching" {
-            let key = item.name.lowercased()
-            guard byName[key] == nil else { continue }
-            let id = "free-exercise-db:\(item.id)"
-            byName[key] = ExerciseDefinition(
-                id: id,
-                name: item.name,
-                aliases: [],
-                equipment: item.equipment ?? "other",
-                loadMode: loadMode(for: item),
-                weightIncrement: 5,
-                muscles: detailedFallback(primary: item.primaryMuscles, secondary: item.secondaryMuscles)
+            let key = normalizedKey(item.name)
+            guard !key.isEmpty, taken.insert(key).inserted else { continue }
+            merged.append(
+                ExerciseDefinition(
+                    id: "\(importedIDPrefix)\(item.id)",
+                    name: item.name,
+                    aliases: [],
+                    equipment: item.equipment ?? "other",
+                    loadMode: loadMode(for: item),
+                    weightIncrement: 5,
+                    muscles: detailedFallback(primary: item.primaryMuscles, secondary: item.secondaryMuscles),
+                    equipmentClass: equipmentClass(for: item)
+                )
             )
         }
-        return Array(byName.values)
+        return merged
+    }
+
+    /// Punctuation-free and plural-free, so "Pull-up", "Pull Up", and "Pullups" are all
+    /// recognised as the one exercise already in the library.
+    private static func normalizedKey(_ value: String) -> String {
+        let stripped = value.lowercased().filter { $0.isLetter || $0.isNumber }
+        return stripped.hasSuffix("s") ? String(stripped.dropLast()) : stripped
     }
 
     private static func loadMode(for item: RemoteExercise) -> ExerciseLoadMode {
         if item.equipment == "body only" { return .bodyweight }
         if item.equipment == "dumbbell" { return .perHand }
         return .total
+    }
+
+    /// Imported rows only say "machine", never whether the machine is pin-loaded or
+    /// plate-loaded, so `machine` is read as selectorized. That is the common case in a
+    /// commercial gym and it still gives the row a usable brand list; a curated seed is
+    /// the fix when a specific plate-loaded machine matters.
+    private static func equipmentClass(for item: RemoteExercise) -> EquipmentClass {
+        switch item.equipment {
+        case "barbell": .barbell
+        case "dumbbell": .dumbbell
+        case "cable": .cable
+        case "machine": .selectorized
+        case "body only": .bodyweight
+        case "e-z curl bar": .barbell
+        default: .other
+        }
     }
 
     static func detailedFallback(primary: [String], secondary: [String]) -> [MuscleContribution] {
@@ -216,112 +357,4 @@ private struct RemoteExercise: Decodable {
     let primaryMuscles: [String]
     let secondaryMuscles: [String]
     let category: String
-}
-
-private extension ExerciseCatalog {
-    static let seedExercises: [ExerciseDefinition] = [
-        exercise(
-            "machine-chest-fly", "Machine chest fly", ["pec deck", "machine fly"], "machine", .total,
-            [.middleChest: 1, .upperChest: 0.55, .lowerChest: 0.45, .frontDelts: 0.3]
-        ),
-        exercise(
-            "lat-pulldown", "Lat pulldown", ["pulldown"], "cable", .total,
-            [.lats: 1, .bicepsLongHead: 0.55, .bicepsShortHead: 0.5, .brachialis: 0.45, .lowerTraps: 0.45, .rhomboids: 0.4]
-        ),
-        exercise(
-            "pull-up", "Pull-up", ["pullup", "pull up"], "bodyweight", .addedWeight,
-            [.lats: 1, .bicepsLongHead: 0.6, .bicepsShortHead: 0.5, .brachialis: 0.5, .lowerTraps: 0.45, .rhomboids: 0.4]
-        ),
-        exercise(
-            "seated-machine-row", "Seated machine row", ["mid chest row", "machine row", "mid back row"], "machine", .total,
-            [.rhomboids: 1, .middleTraps: 0.9, .lats: 0.65, .rearDelts: 0.6, .bicepsLongHead: 0.45, .bicepsShortHead: 0.45]
-        ),
-        exercise(
-            "incline-machine-chest-press", "Incline machine chest press", ["upper chest machine push", "upper chest press"], "machine", .total,
-            [.upperChest: 1, .middleChest: 0.55, .frontDelts: 0.7, .tricepsLateralHead: 0.5, .tricepsLongHead: 0.35]
-        ),
-        exercise(
-            "neutral-grip-machine-shoulder-press", "Neutral-grip machine shoulder press", ["shoulder press other grip"], "machine", .total,
-            [.frontDelts: 1, .sideDelts: 0.75, .tricepsLateralHead: 0.55, .tricepsLongHead: 0.4, .upperChest: 0.25]
-        ),
-        exercise(
-            "rope-triceps-pushdown", "Rope triceps pushdown", ["rope pushdown"], "cable", .total,
-            [.tricepsLateralHead: 1, .tricepsMedialHead: 0.85, .tricepsLongHead: 0.55]
-        ),
-        exercise(
-            "straight-bar-triceps-pushdown", "Straight-bar triceps pushdown", ["flat bar pushdown", "bar pushdown"], "cable", .total,
-            [.tricepsLateralHead: 1, .tricepsMedialHead: 0.85, .tricepsLongHead: 0.5]
-        ),
-        exercise(
-            "incline-dumbbell-curl", "Incline dumbbell curl", ["incline bench curl"], "dumbbells", .perHand,
-            [.bicepsLongHead: 1, .bicepsShortHead: 0.65, .brachialis: 0.5, .forearms: 0.25]
-        ),
-        exercise(
-            "dumbbell-wrist-curl", "Dumbbell wrist curl", ["wrist curl", "forearm curl"], "dumbbells", .perHand,
-            [.forearms: 1]
-        ),
-        exercise(
-            "reverse-dumbbell-wrist-curl", "Reverse dumbbell wrist curl", ["reverse wrist curl"], "dumbbells", .perHand,
-            [.forearms: 1]
-        ),
-        exercise(
-            "single-arm-cable-lateral-raise", "Single-arm cable lateral raise", ["shoulder cable single arm raise"], "cable", .total,
-            [.sideDelts: 1, .frontDelts: 0.25, .upperTraps: 0.25]
-        ),
-        exercise(
-            "seated-leg-extension", "Seated leg extension", ["leg extension"], "machine", .total,
-            [.rectusFemoris: 1, .vastusLateralis: 0.95, .vastusMedialis: 0.95]
-        ),
-        exercise(
-            "seated-leg-curl", "Seated leg curl", ["seated hamstring curl"], "machine", .total,
-            [.hamstrings: 1, .gastrocnemius: 0.2]
-        ),
-        exercise(
-            "lying-leg-curl", "Lying leg curl", ["laying leg curl", "prone leg curl"], "machine", .total,
-            [.hamstrings: 1, .gastrocnemius: 0.25]
-        ),
-        exercise(
-            "hip-adductor-machine", "Hip adductor machine", ["adductor"], "machine", .total,
-            [.adductors: 1]
-        ),
-        exercise(
-            "hip-abductor-machine", "Hip abductor machine", ["abductor"], "machine", .total,
-            [.abductors: 1, .gluteMed: 0.85]
-        ),
-        exercise(
-            "calf-raise", "Calf raise", ["calf raises"], "machine", .total,
-            [.gastrocnemius: 1, .soleus: 0.75]
-        ),
-        exercise(
-            "plate-loaded-squat", "Plate-loaded squat", ["machine squat", "hack squat"], "plate-loaded machine", .total,
-            [.rectusFemoris: 0.85, .vastusLateralis: 1, .vastusMedialis: 0.9, .gluteMax: 0.8, .adductors: 0.35, .hamstrings: 0.3]
-        ),
-        exercise(
-            "kneeling-rope-cable-crunch", "Kneeling rope cable crunch", ["cable kneeling crunch", "rope crunch"], "cable", .total,
-            [.rectusAbdominis: 1, .obliques: 0.35]
-        ),
-        exercise(
-            "crunch", "Crunch", ["crunches"], "bodyweight", .bodyweight,
-            [.rectusAbdominis: 1, .obliques: 0.25]
-        )
-    ]
-
-    static func exercise(
-        _ id: String,
-        _ name: String,
-        _ aliases: [String],
-        _ equipment: String,
-        _ loadMode: ExerciseLoadMode,
-        _ muscles: [MuscleGroup: Double]
-    ) -> ExerciseDefinition {
-        ExerciseDefinition(
-            id: id,
-            name: name,
-            aliases: aliases,
-            equipment: equipment,
-            loadMode: loadMode,
-            weightIncrement: 5,
-            muscles: muscles.map(MuscleContribution.init).sorted { $0.muscle.rawValue < $1.muscle.rawValue }
-        )
-    }
 }
