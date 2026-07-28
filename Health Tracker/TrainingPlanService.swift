@@ -54,7 +54,11 @@ final class TrainingPlanService: ObservableObject {
             errorMessage = nil
             try? data.write(to: cacheURL, options: .atomic)
         } catch {
-            errorMessage = "Could not refresh the plan. Showing the last saved version."
+            // Only claim a fallback exists when one actually does. On a fresh install
+            // with no cache this used to point at a saved version that was not there.
+            errorMessage = plan == nil
+                ? "Could not load this week's plan. Check the connection and pull to refresh."
+                : "Could not refresh the plan. Showing the last saved version."
         }
     }
 

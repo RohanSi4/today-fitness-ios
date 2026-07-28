@@ -48,11 +48,45 @@ final class HealthKitManager: HealthDataProviding, BodyWeightHealthStoring, Runn
 
     private let store: HKHealthStore
     private let sessionAssembler = SleepSessionAssembler()
+
+    // Touched from observer callbacks on HealthKit's own queues as well as from the
+    // main actor, so all of it sits behind one lock.
+    private let monitorLock = NSLock()
     private var sleepObserverQuery: HKObserverQuery?
     private var workoutObserverQuery: HKObserverQuery?
+    private var sleepBackgroundDeliveryEnabled = false
+    private var workoutBackgroundDeliveryEnabled = false
 
     private init(store: HKHealthStore = HKHealthStore()) {
         self.store = store
+    }
+
+    private func withMonitorLock<T>(_ body: () -> T) -> T {
+        monitorLock.lock()
+        defer { monitorLock.unlock() }
+        return body()
+    }
+
+    /// Background delivery cannot be turned on until Health authorization has been
+    /// answered, and both observers are started from `App.init`, before any prompt.
+    /// The old code fired and forgot, so on a fresh install the failure was
+    /// permanent: no watch run or sleep sample ever woke the app again. Record
+    /// success and retry on every later call instead.
+    private func enableBackgroundDelivery(for type: HKObjectType, isSleep: Bool) {
+        let alreadyEnabled = withMonitorLock {
+            isSleep ? sleepBackgroundDeliveryEnabled : workoutBackgroundDeliveryEnabled
+        }
+        guard !alreadyEnabled else { return }
+        store.enableBackgroundDelivery(for: type, frequency: .immediate) { [weak self] success, _ in
+            guard success, let self else { return }
+            self.withMonitorLock {
+                if isSleep {
+                    self.sleepBackgroundDeliveryEnabled = true
+                } else {
+                    self.workoutBackgroundDeliveryEnabled = true
+                }
+            }
+        }
     }
 
     func requestAuthorization() async throws {
@@ -75,16 +109,12 @@ final class HealthKitManager: HealthDataProviding, BodyWeightHealthStoring, Runn
             HKWorkoutType.workoutType(),
         ]
 
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            store.requestAuthorization(toShare: [], read: readTypes) { success, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else if success {
-                    continuation.resume(returning: ())
-                } else {
-                    continuation.resume(throwing: HealthKitError.authorizationDenied)
-                }
-            }
+        try await requestAuthorization(toShare: [], read: readTypes)
+        // Now that the prompt has been answered, a sleep observer registered at
+        // launch can finally get background delivery turned on.
+        let hasSleepObserver = withMonitorLock { sleepObserverQuery != nil }
+        if hasSleepObserver {
+            enableBackgroundDelivery(for: sleepType, isSleep: true)
         }
     }
 
@@ -114,10 +144,9 @@ final class HealthKitManager: HealthDataProviding, BodyWeightHealthStoring, Runn
             throw HealthKitError.healthDataNotAvailable
         }
         try await requestAuthorization(toShare: [], read: [HKWorkoutType.workoutType()])
-        try await store.enableBackgroundDelivery(
-            for: HKWorkoutType.workoutType(),
-            frequency: .immediate
-        )
+        // Best effort. A background-delivery failure is not an authorization
+        // failure, and throwing it made callers treat a granted prompt as denied.
+        enableBackgroundDelivery(for: HKWorkoutType.workoutType(), isSleep: false)
     }
 
     func saveBodyWeight(pounds: Double, date: Date) async throws -> UUID {
@@ -216,8 +245,9 @@ final class HealthKitManager: HealthDataProviding, BodyWeightHealthStoring, Runn
     }
 
     func startSleepWakeMonitoring(onWake: @escaping @Sendable (Date) -> Void) {
-        guard sleepObserverQuery == nil,
-              let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) else {
+        guard let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) else { return }
+        guard withMonitorLock({ sleepObserverQuery == nil }) else {
+            enableBackgroundDelivery(for: sleepType, isSleep: true)
             return
         }
 
@@ -241,22 +271,25 @@ final class HealthKitManager: HealthDataProviding, BodyWeightHealthStoring, Runn
                 onWake(latest.end)
             }
         }
-        sleepObserverQuery = query
+        withMonitorLock { sleepObserverQuery = query }
         store.execute(query)
-        store.enableBackgroundDelivery(for: sleepType, frequency: .immediate) { _, _ in }
+        enableBackgroundDelivery(for: sleepType, isSleep: true)
     }
 
     func startWorkoutMonitoring(onChange: @escaping @Sendable () -> Void) {
-        guard workoutObserverQuery == nil else { return }
         let workoutType = HKWorkoutType.workoutType()
+        guard withMonitorLock({ workoutObserverQuery == nil }) else {
+            enableBackgroundDelivery(for: workoutType, isSleep: false)
+            return
+        }
         let query = HKObserverQuery(sampleType: workoutType, predicate: nil) { _, completion, error in
             defer { completion() }
             guard error == nil else { return }
             onChange()
         }
-        workoutObserverQuery = query
+        withMonitorLock { workoutObserverQuery = query }
         store.execute(query)
-        store.enableBackgroundDelivery(for: workoutType, frequency: .immediate) { _, _ in }
+        enableBackgroundDelivery(for: workoutType, isSleep: false)
     }
 
     func fetchSleepSessions(start: Date, end: Date) async throws -> [SleepSession] {
@@ -303,6 +336,7 @@ final class HealthKitManager: HealthDataProviding, BodyWeightHealthStoring, Runn
         let interval = DateComponents(day: 1)
         let unit = unit(for: kind)
 
+        let healthStore = store
         return try await withCheckedThrowingContinuation { continuation in
             let query = HKStatisticsCollectionQuery(
                 quantityType: quantityType,
@@ -312,7 +346,11 @@ final class HealthKitManager: HealthDataProviding, BodyWeightHealthStoring, Runn
                 intervalComponents: interval
             )
 
-            query.initialResultsHandler = { _, results, error in
+            query.initialResultsHandler = { query, results, error in
+                // A collection query keeps running until it is stopped, unlike a
+                // sample query. Three of these leaked on every recap load.
+                healthStore.stop(query)
+
                 if let error {
                     continuation.resume(throwing: error)
                     return
@@ -325,7 +363,7 @@ final class HealthKitManager: HealthDataProviding, BodyWeightHealthStoring, Runn
                 }
                 continuation.resume(returning: data)
             }
-            store.execute(query)
+            healthStore.execute(query)
         }
     }
 

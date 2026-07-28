@@ -23,7 +23,8 @@ final class NotificationManager: NSObject, RecapNotificationScheduling, WeightRe
 
     private let recapNotificationID = "dailyRecap"
     private let recapDateKey = "recapDate"
-    private let weightReminderPrefix = "weightReminder"
+    private static let weightReminderPrefix = "weightReminder"
+    private static let maximumReminderDays = 14
 
     func register() {
         UNUserNotificationCenter.current().delegate = self
@@ -86,13 +87,17 @@ final class NotificationManager: NSObject, RecapNotificationScheduling, WeightRe
 
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: date)
-        let formatter = Self.dayFormatter
 
-        for offset in 0..<max(1, min(days, 30)) {
+        // iOS keeps at most 64 pending local notifications per app and silently
+        // discards the rest. Thirty days of two reminders was 60 on its own, so the
+        // daily recap and the wake nudge were fighting for the last four slots and
+        // losing at random. Two weeks is 28, which leaves real headroom, and these
+        // get rescheduled every time a weight is logged anyway.
+        for offset in 0..<Self.reminderDayCount(requested: days) {
             guard let day = calendar.date(byAdding: .day, value: offset, to: today) else { continue }
-            let dayKey = formatter.string(from: day)
+            let dayKey = Self.dayKey(for: day)
             await scheduleWeightReminder(
-                identifier: "\(weightReminderPrefix).morning.\(dayKey)",
+                identifier: "\(Self.weightReminderPrefix).morning.\(dayKey)",
                 title: "Morning check-in",
                 body: "Log your weight while the scale is right there.",
                 day: day,
@@ -101,7 +106,7 @@ final class NotificationManager: NSObject, RecapNotificationScheduling, WeightRe
                 center: center
             )
             await scheduleWeightReminder(
-                identifier: "\(weightReminderPrefix).lunch.\(dayKey)",
+                identifier: "\(Self.weightReminderPrefix).lunch.\(dayKey)",
                 title: "Quick reminder",
                 body: "No weight logged yet. It takes five seconds.",
                 day: day,
@@ -113,16 +118,29 @@ final class NotificationManager: NSObject, RecapNotificationScheduling, WeightRe
     }
 
     func cancelWeightReminders(for date: Date) {
-        let dayKey = Self.dayFormatter.string(from: date)
-        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [
-            "\(weightReminderPrefix).morning.\(dayKey)",
-            "\(weightReminderPrefix).lunch.\(dayKey)"
-        ])
+        UNUserNotificationCenter.current()
+            .removePendingNotificationRequests(withIdentifiers: Self.weightReminderIDs(for: date))
+    }
+
+    /// Every reminder that nags about logging a weight for this day. The wake nudge
+    /// used to be left out, so after logging on the scale the phone still buzzed
+    /// "log your morning weight" a few minutes later.
+    /// iOS keeps 64 pending local notifications and silently drops the rest.
+    static let systemPendingNotificationLimit = 64
+    static let remindersPerDay = 2
+
+    static func reminderDayCount(requested: Int) -> Int {
+        max(1, min(requested, maximumReminderDays))
+    }
+
+    static func weightReminderIDs(for date: Date) -> [String] {
+        let dayKey = Self.dayKey(for: date)
+        return ["morning", "lunch", "wake"].map { "\(Self.weightReminderPrefix).\($0).\(dayKey)" }
     }
 
     func scheduleWeightReminderAfterWake(_ wakeTime: Date) {
-        Task { @MainActor [weak self] in
-            guard let self, TodayStore.shared.todayWeight == nil else { return }
+        Task { @MainActor in
+            guard TodayStore.shared.todayWeight == nil else { return }
             let center = UNUserNotificationCenter.current()
             let settings = await center.notificationSettings()
             guard settings.authorizationStatus == .authorized ||
@@ -135,11 +153,10 @@ final class NotificationManager: NSObject, RecapNotificationScheduling, WeightRe
             let fireDate = max(intended, now.addingTimeInterval(5))
             guard fireDate.timeIntervalSince(now) <= 90 * 60 else { return }
 
-            let dayKey = Self.dayFormatter.string(from: wakeTime)
-            center.removePendingNotificationRequests(withIdentifiers: [
-                "\(weightReminderPrefix).morning.\(dayKey)",
-                "\(weightReminderPrefix).wake.\(dayKey)"
-            ])
+            let dayKey = Self.dayKey(for: wakeTime)
+            center.removePendingNotificationRequests(
+                withIdentifiers: Self.weightReminderIDs(for: wakeTime)
+            )
 
             let content = UNMutableNotificationContent()
             content.title = "You’re up"
@@ -152,7 +169,7 @@ final class NotificationManager: NSObject, RecapNotificationScheduling, WeightRe
                 from: fireDate
             )
             let request = UNNotificationRequest(
-                identifier: "\(weightReminderPrefix).wake.\(dayKey)",
+                identifier: "\(Self.weightReminderPrefix).wake.\(dayKey)",
                 content: content,
                 trigger: UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
             )
@@ -219,13 +236,17 @@ final class NotificationManager: NSObject, RecapNotificationScheduling, WeightRe
         }
     }
 
-    private static let dayFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
-    }()
+    /// Read `Calendar.current` per call rather than caching a formatter, so the day
+    /// a reminder is filed under follows the device across time zones.
+    static func dayKey(for date: Date, calendar: Calendar = .current) -> String {
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(
+            format: "%04d-%02d-%02d",
+            components.year ?? 0,
+            components.month ?? 0,
+            components.day ?? 0
+        )
+    }
 
     private func buildSleepHighlight(for summary: SleepSummary) -> String {
         guard summary.avgDuration > 0 else {

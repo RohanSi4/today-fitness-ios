@@ -16,6 +16,15 @@ final class TodayStore: ObservableObject {
     /// can save normally.
     private var didLoadCleanly = true
 
+    /// True between a save that did not reach disk and the next one that does. The
+    /// old code told the owner "it will try again" and then never did.
+    private var hasUnsavedChanges = false
+
+    /// Whether the in-memory archive actually came from disk. Anything that
+    /// publishes this state outside the app - the widget above all - has to check
+    /// it, because an unreadable load leaves the store empty, not wrong-but-close.
+    var hasReliableData: Bool { didLoadCleanly }
+
     private let storageURL: URL
     private let calendar: Calendar
     private let syncService: any CoachSyncing
@@ -82,12 +91,25 @@ final class TodayStore: ObservableObject {
     }
 
     func mergeHealthWeights(_ entries: [WeightEntry]) {
+        var changed = false
         for entry in entries
             .filter({ $0.pounds.isFinite && $0.pounds > 0 && $0.pounds < 1_000 })
             .sorted(by: { $0.date < $1.date }) {
+            // Every HealthKit fetch rebuilds these values with fresh ids, so a plain
+            // replace rewrote identical rows, churned SwiftUI identity, and fired a
+            // coach sync on every single weight save. Only take a genuine change.
+            let existing = weights.first { calendar.isDate($0.date, inSameDayAs: entry.date) }
+            if let existing,
+               existing.date == entry.date,
+               existing.pounds == entry.pounds,
+               existing.healthKitID == entry.healthKitID {
+                continue
+            }
             weights.removeAll { calendar.isDate($0.date, inSameDayAs: entry.date) }
             weights.append(entry)
+            changed = true
         }
+        guard changed else { return }
         weights.sort { $0.date > $1.date }
         persist(syncAfterSave: true)
     }
@@ -235,6 +257,14 @@ final class TodayStore: ObservableObject {
         case .decoded(let stored):
             apply(stored)
             didLoadCleanly = true
+            if stored.unreadableEntryCount > 0 {
+                // Some entries did not decode, so the next save would write a
+                // shorter archive than the one on disk. Keep the original bytes
+                // first: they may be perfectly good data this build cannot parse.
+                let count = stored.unreadableEntryCount
+                quarantine(storageURL, reason: "partial")
+                dataRecoveryMessage = "Today loaded your data but skipped \(count) \(count == 1 ? "entry it" : "entries it") could not read. A copy of the original file was kept."
+            }
         case .unreadable:
             markUnreadable()
         case .corrupt:
@@ -245,6 +275,8 @@ final class TodayStore: ObservableObject {
     private func loadFromBackup() {
         switch readStoredData(at: storageURL.appendingPathExtension("backup")) {
         case .decoded(let stored):
+            // Keep the unreadable primary before the restored copy overwrites it.
+            quarantine(storageURL, reason: "corrupt")
             apply(stored)
             didLoadCleanly = true
             dataRecoveryMessage = "Today restored the last good copy of your private data."
@@ -253,8 +285,14 @@ final class TodayStore: ObservableObject {
             markUnreadable()
         case .missing, .corrupt:
             // Genuinely unrecoverable rather than locked, so writing is safe again.
+            // Writing is also what destroys the original, so copy it aside first:
+            // the old message promised the file was left in place, and the very
+            // next save broke that promise.
             didLoadCleanly = true
-            dataRecoveryMessage = "Today could not read the saved data. The original file was left in place."
+            let kept = quarantine(storageURL, reason: "corrupt") != nil
+            dataRecoveryMessage = kept
+                ? "Today could not read the saved data and started fresh. A copy of the unreadable file was kept on this phone."
+                : "Today could not read the saved data and started fresh."
         }
     }
 
@@ -263,20 +301,95 @@ final class TodayStore: ObservableObject {
         dataRecoveryMessage = "Today could not read your saved data because the phone was locked. It will load once you unlock and open the app, and nothing was overwritten."
     }
 
-    /// Retry a load that failed only because the device was locked. Safe to call on
-    /// every foreground transition: it does nothing unless a read actually failed.
+    /// Recovery hook for becoming active again. Retries a load that failed only
+    /// because the device was locked, and retries a save that never reached disk.
+    /// Safe to call on every foreground transition: it does nothing unless a read
+    /// or a write actually failed.
     func reloadIfUnreadable() {
-        guard !didLoadCleanly else { return }
-        load()
-        if didLoadCleanly { dataRecoveryMessage = nil }
+        if !didLoadCleanly {
+            // Anything typed while the archive was unreadable exists only in memory.
+            // Reloading would replace it with the file, so carry it back over.
+            let pending = hasUnsavedChanges ? syncSnapshot : nil
+            load()
+            guard didLoadCleanly else { return }
+            dataRecoveryMessage = nil
+            if let pending { reapply(pending) }
+        }
+        if hasUnsavedChanges { persist(syncAfterSave: true) }
     }
 
     private func apply(_ stored: StoredTodayData) {
         weights = stored.weights.sorted { $0.date > $1.date }
         workouts = stored.workouts.sorted { $0.startedAt > $1.startedAt }
         activeWorkout = stored.activeWorkout
-        goalWeight = stored.goalWeight.isFinite && stored.goalWeight > 0 ? stored.goalWeight : 175
+        goalWeight = stored.goalWeight.isFinite && stored.goalWeight > 0
+            ? stored.goalWeight
+            : StoredTodayData.defaultGoalWeight
     }
+
+    /// Layer entries that only ever existed in memory back on top of a load, newest
+    /// wins per day, so a recovered read cannot erase what was logged in the meantime.
+    private func reapply(_ pending: StoredTodayData) {
+        for entry in pending.weights.sorted(by: { $0.date < $1.date }) {
+            weights.removeAll { calendar.isDate($0.date, inSameDayAs: entry.date) }
+            weights.append(entry)
+        }
+        weights.sort { $0.date > $1.date }
+
+        let known = Set(workouts.map(\.id))
+        workouts.append(contentsOf: pending.workouts.filter { !known.contains($0.id) })
+        workouts.sort { $0.startedAt > $1.startedAt }
+
+        if let active = pending.activeWorkout { activeWorkout = active }
+        // A goal left at the default is indistinguishable from one never touched,
+        // so only a deliberate-looking value overrides what was on disk.
+        if pending.goalWeight != StoredTodayData.defaultGoalWeight {
+            goalWeight = pending.goalWeight
+        }
+    }
+
+    /// Copies a file aside under a timestamped name so unreadable-but-possibly-good
+    /// bytes survive the next write. Returns the copy, or nil if there was nothing
+    /// to copy.
+    @discardableResult
+    private func quarantine(_ url: URL, reason: String) -> URL? {
+        guard let data = try? Data(contentsOf: url), !data.isEmpty else { return nil }
+        let stamp = Int(Date().timeIntervalSince1970)
+        let destination = url
+            .deletingPathExtension()
+            .appendingPathExtension("\(reason)-\(stamp)")
+            .appendingPathExtension("json")
+        do {
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try data.write(to: destination, options: [.atomic, .completeFileProtection])
+        } catch {
+            return nil
+        }
+        pruneQuarantine()
+        return destination
+    }
+
+    /// Salvaged copies are for hand recovery, not storage. Keep the newest few.
+    private func pruneQuarantine() {
+        let directory = storageURL.deletingLastPathComponent()
+        let stem = storageURL.deletingPathExtension().lastPathComponent
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        ) else { return }
+        let salvaged = files
+            .filter { $0.lastPathComponent.hasPrefix("\(stem).corrupt-") || $0.lastPathComponent.hasPrefix("\(stem).partial-") }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        guard salvaged.count > Self.maximumQuarantinedCopies else { return }
+        for url in salvaged.prefix(salvaged.count - Self.maximumQuarantinedCopies) {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    private static let maximumQuarantinedCopies = 5
 
     private func schedulePersist() {
         pendingPersistTask?.cancel()
@@ -293,13 +406,11 @@ final class TodayStore: ObservableObject {
         // Never let an in-memory state we could not verify overwrite the file on
         // disk. Without this, one locked-device background launch silently replaced
         // the real archive with an empty one.
-        guard didLoadCleanly else { return }
-        let value = StoredTodayData(
-            weights: weights,
-            workouts: workouts,
-            activeWorkout: activeWorkout,
-            goalWeight: goalWeight
-        )
+        guard didLoadCleanly else {
+            hasUnsavedChanges = true
+            return
+        }
+        let value = syncSnapshot
         do {
             try FileManager.default.createDirectory(
                 at: storageURL.deletingLastPathComponent(),
@@ -314,6 +425,7 @@ final class TodayStore: ObservableObject {
                 )
             }
             try data.write(to: storageURL, options: [.atomic, .completeFileProtection])
+            hasUnsavedChanges = false
             if syncAfterSave {
                 syncService.scheduleSync(snapshot: value, catalog: .shared)
             }
@@ -322,6 +434,9 @@ final class TodayStore: ObservableObject {
             // failed save was invisible. Surface it, since HistoryView already shows
             // this message.
             assertionFailure("Could not persist Today data: \(error)")
+            // Flagged so `reloadIfUnreadable` can actually make good on the promise
+            // below the next time the app comes to the foreground.
+            hasUnsavedChanges = true
             dataRecoveryMessage = "Today could not save your latest changes. They are still here in the app, and it will try again."
         }
     }

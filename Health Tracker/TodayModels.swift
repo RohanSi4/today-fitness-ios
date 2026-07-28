@@ -234,16 +234,31 @@ struct WeightEntry: Codable, Hashable, Identifiable {
 }
 
 struct StoredTodayData: Codable {
+    static let defaultGoalWeight: Double = 175
+
     var weights: [WeightEntry] = []
     var workouts: [WorkoutSession] = []
     var activeWorkout: WorkoutSession?
-    var goalWeight: Double = 175
+    var goalWeight: Double = StoredTodayData.defaultGoalWeight
+
+    /// Entries that were in the file but could not be decoded, so this value is a
+    /// partial view of what is on disk. Never encoded. `TodayStore` uses it to keep
+    /// a copy of the original bytes instead of quietly writing the shorter list
+    /// back over a year of training history.
+    private(set) var unreadableEntryCount = 0
+
+    private enum CodingKeys: String, CodingKey {
+        case weights
+        case workouts
+        case activeWorkout
+        case goalWeight
+    }
 
     init(
         weights: [WeightEntry] = [],
         workouts: [WorkoutSession] = [],
         activeWorkout: WorkoutSession? = nil,
-        goalWeight: Double = 175
+        goalWeight: Double = StoredTodayData.defaultGoalWeight
     ) {
         self.weights = weights
         self.workouts = workouts
@@ -251,12 +266,68 @@ struct StoredTodayData: Codable {
         self.goalWeight = goalWeight
     }
 
+    // Decoding is deliberately element-by-element. The synthesised array decode is
+    // all-or-nothing: one workout written by a newer build, or one entry with a
+    // field this build cannot parse, used to fail the whole file, which downgraded
+    // to "corrupt" and put the entire archive at risk. Losing one session beats
+    // losing every session. Anything skipped is counted so the caller can preserve
+    // the original file.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        weights = try container.decodeIfPresent([WeightEntry].self, forKey: .weights) ?? []
-        workouts = try container.decodeIfPresent([WorkoutSession].self, forKey: .workouts) ?? []
-        activeWorkout = try container.decodeIfPresent(WorkoutSession.self, forKey: .activeWorkout)
-        goalWeight = try container.decodeIfPresent(Double.self, forKey: .goalWeight) ?? 175
+        var dropped = 0
+        weights = try Self.decodeLossyArray(WeightEntry.self, from: container, forKey: .weights, dropped: &dropped)
+        workouts = try Self.decodeLossyArray(WorkoutSession.self, from: container, forKey: .workouts, dropped: &dropped)
+
+        if Self.hasValue(container, .activeWorkout) {
+            activeWorkout = try? container.decode(WorkoutSession.self, forKey: .activeWorkout)
+            if activeWorkout == nil { dropped += 1 }
+        }
+
+        if Self.hasValue(container, .goalWeight) {
+            let decoded = try? container.decode(Double.self, forKey: .goalWeight)
+            if decoded == nil { dropped += 1 }
+            goalWeight = decoded ?? Self.defaultGoalWeight
+        }
+        unreadableEntryCount = dropped
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(weights, forKey: .weights)
+        try container.encode(workouts, forKey: .workouts)
+        try container.encodeIfPresent(activeWorkout, forKey: .activeWorkout)
+        try container.encode(goalWeight, forKey: .goalWeight)
+    }
+
+    private static func hasValue(
+        _ container: KeyedDecodingContainer<CodingKeys>,
+        _ key: CodingKeys
+    ) -> Bool {
+        container.contains(key) && (try? container.decodeNil(forKey: key)) != true
+    }
+
+    /// Throws only when the key holds something that is not an array at all, which
+    /// really is a corrupt file rather than one stale entry.
+    private static func decodeLossyArray<T: Decodable>(
+        _ type: T.Type,
+        from container: KeyedDecodingContainer<CodingKeys>,
+        forKey key: CodingKeys,
+        dropped: inout Int
+    ) throws -> [T] {
+        guard hasValue(container, key) else { return [] }
+        let raw = try container.decode([LossyDecoded<T>].self, forKey: key)
+        dropped += raw.lazy.filter { $0.value == nil }.count
+        return raw.compactMap(\.value)
+    }
+}
+
+/// Decodes an element, or records that it could not be decoded, without failing
+/// the array around it.
+private struct LossyDecoded<T: Decodable>: Decodable {
+    let value: T?
+
+    init(from decoder: Decoder) throws {
+        value = try? T(from: decoder)
     }
 }
 

@@ -106,23 +106,33 @@ final class CoachSyncService: ObservableObject, CoachSyncing {
     private let session: URLSession
     private let defaults: UserDefaults
     private let keychain: CoachSyncKeychain
+    private let retryDelays: [Duration]
     private var pairing: CoachSyncPairing?
-    private var syncTask: Task<Void, Never>?
+    private var debounceTask: Task<Void, Never>?
+
+    /// Bumped every time local data changes. A finished upload may only clear the
+    /// pending flag for the generation it actually carried.
+    private var dataGeneration = 0
+    private var isSyncing = false
+    private var queued: (snapshot: StoredTodayData, catalog: ExerciseCatalog)?
 
     private static let pairingAccount = "coach-sync-pairing-v1"
     private static let lastSyncedKey = "coachSync.lastSyncedAt"
     private static let pendingKey = "coachSync.hasPendingChanges"
     private static let deviceKey = "coachSync.deviceId"
     private static let sharesWeightKey = "coachSync.sharesWeightTrend"
+    private static let maximumCoalescedPasses = 3
 
     init(
         session: URLSession = .shared,
         defaults: UserDefaults = .standard,
-        keychain: CoachSyncKeychain = CoachSyncKeychain()
+        keychain: CoachSyncKeychain = CoachSyncKeychain(),
+        retryDelays: [Duration] = [.seconds(2), .seconds(8)]
     ) {
         self.session = session
         self.defaults = defaults
         self.keychain = keychain
+        self.retryDelays = retryDelays
         lastSyncedAt = defaults.object(forKey: Self.lastSyncedKey) as? Date
         hasPendingChanges = defaults.bool(forKey: Self.pendingKey)
         sharesWeightTrend = defaults.bool(forKey: Self.sharesWeightKey)
@@ -139,9 +149,10 @@ final class CoachSyncService: ObservableObject, CoachSyncing {
 
     func markPending() {
         guard pairing != nil else { return }
+        dataGeneration &+= 1
         hasPendingChanges = true
         defaults.set(true, forKey: Self.pendingKey)
-        if case .syncing = state { return }
+        if isSyncing { return }
         state = .ready
     }
 
@@ -175,8 +186,9 @@ final class CoachSyncService: ObservableObject, CoachSyncing {
     }
 
     func disconnect() {
-        syncTask?.cancel()
-        syncTask = nil
+        debounceTask?.cancel()
+        debounceTask = nil
+        queued = nil
         keychain.delete(Self.pairingAccount)
         pairing = nil
         hasPendingChanges = false
@@ -191,54 +203,202 @@ final class CoachSyncService: ObservableObject, CoachSyncing {
     func scheduleSync(snapshot: StoredTodayData, catalog: ExerciseCatalog) {
         markPending()
         guard pairing != nil else { return }
-        syncTask?.cancel()
-        syncTask = Task { [weak self] in
+        debounceTask?.cancel()
+        debounceTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(500))
-            guard !Task.isCancelled else { return }
-            await self?.sync(snapshot: snapshot, catalog: catalog)
+            guard !Task.isCancelled, let self else { return }
+            // Past the debounce window. Drop the handle so a later schedule cannot
+            // cancel an upload that is already on the wire: that used to abort the
+            // request and surface it as "Needs attention".
+            self.debounceTask = nil
+            await self.sync(snapshot: snapshot, catalog: catalog)
         }
     }
 
     func sync(snapshot: StoredTodayData, catalog: ExerciseCatalog) async {
-        guard let pairing else {
+        guard pairing != nil else {
             state = .notConnected
             return
         }
-        guard state != .syncing else { return }
+
+        // A sync arriving while one is in flight used to be dropped on the floor
+        // while the in-flight one went on to clear `hasPendingChanges`. The newer
+        // lift or weight was then never sent, and the app still said "Up to date"
+        // until some unrelated change happened to trigger another sync. Queue it.
+        guard !isSyncing else {
+            queued = (snapshot, catalog)
+            markPending()
+            return
+        }
+
+        isSyncing = true
+        defer { isSyncing = false }
         state = .syncing
 
+        var work: (snapshot: StoredTodayData, catalog: ExerciseCatalog)? = (snapshot, catalog)
+        var passes = 0
+        while let job = work, passes < Self.maximumCoalescedPasses {
+            passes += 1
+            queued = nil
+            let generation = dataGeneration
+
+            switch await attemptUpload(snapshot: job.snapshot, catalog: job.catalog) {
+            case .cancelled:
+                state = pairing == nil ? .notConnected : .ready
+                return
+            case .failed(let message):
+                hasPendingChanges = true
+                defaults.set(true, forKey: Self.pendingKey)
+                state = .failed(message)
+                return
+            case .succeeded:
+                if let next = queued {
+                    work = next
+                    continue
+                }
+                guard dataGeneration == generation else {
+                    // Something changed mid-upload without handing us a snapshot
+                    // (a sharing toggle, say). Stay pending so the next foreground
+                    // pass sends it rather than claiming to be up to date.
+                    state = .ready
+                    return
+                }
+                let now = Date()
+                lastSyncedAt = now
+                hasPendingChanges = false
+                defaults.set(now, forKey: Self.lastSyncedKey)
+                defaults.set(false, forKey: Self.pendingKey)
+                state = .synced(now)
+                return
+            }
+        }
+
+        // Out of coalescing passes with data still newer than the server.
+        state = .ready
+    }
+
+    private enum UploadOutcome {
+        case succeeded
+        case cancelled
+        case failed(String)
+    }
+
+    private func attemptUpload(
+        snapshot: StoredTodayData,
+        catalog: ExerciseCatalog
+    ) async -> UploadOutcome {
+        guard let pairing else { return .cancelled }
+
+        let batch: FitnessSyncBatch
         do {
-            let batch = try makeBatch(snapshot: snapshot, catalog: catalog, pairing: pairing)
-            guard let endpoint = URL(string: pairing.endpoint), Self.isAllowedEndpoint(endpoint) else {
-                throw CoachSyncError.invalidPairingCode
-            }
-            var request = URLRequest(url: endpoint)
-            request.httpMethod = "POST"
-            request.timeoutInterval = 20
-            request.setValue("Bearer \(pairing.writeToken)", forHTTPHeaderField: "Authorization")
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
-            request.httpBody = try Self.encoder.encode(batch)
-
-            let (data, response) = try await session.data(for: request)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                throw CoachSyncError.serverRejected
-            }
-            let receipt = try JSONDecoder().decode(FitnessSyncResponse.self, from: data)
-            guard receipt.ok, receipt.batchId == batch.batchId else { throw CoachSyncError.serverRejected }
-
-            let now = Date()
-            lastSyncedAt = now
-            hasPendingChanges = false
-            defaults.set(now, forKey: Self.lastSyncedKey)
-            defaults.set(false, forKey: Self.pendingKey)
-            state = .synced(now)
-        } catch is CancellationError {
-            state = .ready
+            batch = try makeBatch(snapshot: snapshot, catalog: catalog, pairing: pairing)
+        } catch CoachSyncError.snapshotTooLarge {
+            // This one never fixes itself: the archive only grows. Saying "will
+            // retry when online" would hide a permanently stalled coach copy.
+            return .failed("Your private history has outgrown a single sync. Everything is safe on this phone, but the coach copy is paused until the limit is raised.")
         } catch {
-            hasPendingChanges = true
-            defaults.set(true, forKey: Self.pendingKey)
-            state = .failed("Saved on this phone. Sync will retry when the app is online.")
+            return .failed("Today could not prepare this update. Reconnect in Coach Sync to refresh the connection code.")
+        }
+
+        guard let endpoint = URL(string: pairing.endpoint), Self.isAllowedEndpoint(endpoint) else {
+            return .failed("The saved coach address is no longer allowed. Reconnect with a fresh code.")
+        }
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 20
+        request.setValue("Bearer \(pairing.writeToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
+        do {
+            request.httpBody = try Self.encoder.encode(batch)
+        } catch {
+            return .failed("Today could not prepare this update.")
+        }
+
+        // The same batch id is reused across attempts so a retry after a dropped
+        // response is a repeat, not a second entry.
+        for attempt in 0...retryDelays.count {
+            do {
+                let (data, response) = try await session.data(for: request)
+                guard let http = response as? HTTPURLResponse else {
+                    return .failed(Self.offlineMessage)
+                }
+                if Self.isRetryableStatus(http.statusCode) {
+                    guard attempt < retryDelays.count else {
+                        return .failed("The coach server is not answering right now. Saved on this phone and it will retry.")
+                    }
+                    guard await backOff(retryDelays[attempt]) else { return .cancelled }
+                    continue
+                }
+                guard http.statusCode == 200 else {
+                    return .failed(Self.message(forStatus: http.statusCode))
+                }
+                guard let receipt = try? JSONDecoder().decode(FitnessSyncResponse.self, from: data),
+                      receipt.ok,
+                      receipt.batchId == batch.batchId else {
+                    return .failed("The coach server did not confirm this update, so it stayed on this phone.")
+                }
+                return .succeeded
+            } catch is CancellationError {
+                return .cancelled
+            } catch let error as URLError where error.code == .cancelled {
+                return .cancelled
+            } catch let error as URLError where Self.isTransient(error) {
+                guard attempt < retryDelays.count else { return .failed(Self.offlineMessage) }
+                guard await backOff(retryDelays[attempt]) else { return .cancelled }
+            } catch {
+                return .failed(Self.offlineMessage)
+            }
+        }
+        return .failed(Self.offlineMessage)
+    }
+
+    /// Returns false when the wait was cancelled.
+    private func backOff(_ duration: Duration) async -> Bool {
+        guard duration > .zero else { return !Task.isCancelled }
+        do {
+            try await Task.sleep(for: duration)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private static let offlineMessage = "Saved on this phone. Sync will retry when the app is online."
+
+    static func isTransient(_ error: URLError) -> Bool {
+        switch error.code {
+        case .notConnectedToInternet,
+             .networkConnectionLost,
+             .timedOut,
+             .cannotConnectToHost,
+             .cannotFindHost,
+             .dnsLookupFailed,
+             .internationalRoamingOff,
+             .callIsActive,
+             .dataNotAllowed,
+             .secureConnectionFailed:
+            return true
+        default:
+            return false
+        }
+    }
+
+    static func isRetryableStatus(_ status: Int) -> Bool {
+        status == 408 || status == 429 || (500...599).contains(status)
+    }
+
+    static func message(forStatus status: Int) -> String {
+        switch status {
+        case 401, 403:
+            "The coach server rejected this phone's connection code. Reconnect in Coach Sync."
+        case 413:
+            "Your private history has outgrown a single sync. Everything is safe on this phone."
+        case 400...499:
+            "The coach server rejected this update (\(status)). It is still saved on this phone."
+        default:
+            "The coach server answered unexpectedly (\(status)). Saved on this phone and it will retry."
         }
     }
 
@@ -293,9 +453,9 @@ final class CoachSyncService: ObservableObject, CoachSyncing {
         guard !sevenDay.isEmpty, !twentyEightDay.isEmpty else { return nil }
         let oldest = twentyEightDay.min(by: { $0.date < $1.date })
         let change = oldest?.id == latest.id ? nil : oldest.map { latest.pounds - $0.pounds }
-        let loggedDays = Set(twentyEightDay.map { Self.dayFormatter.string(from: $0.date) }).count
+        let loggedDays = Set(twentyEightDay.map { Self.dayKey(for: $0.date) }).count
         return PublicWeightTrend(
-            asOf: Self.dayFormatter.string(from: latest.date),
+            asOf: Self.dayKey(for: latest.date),
             currentPounds: latest.pounds,
             goalPounds: snapshot.goalWeight,
             sevenDayAverage: sevenDay.map(\.pounds).reduce(0, +) / Double(sevenDay.count),
@@ -328,7 +488,7 @@ final class CoachSyncService: ObservableObject, CoachSyncing {
                 let endedAt = workout.endedAt ?? workout.startedAt
                 return PublicStrengthSession(
                     id: "workout_\(workout.id.uuidString.lowercased())",
-                    date: Self.dayFormatter.string(from: workout.startedAt),
+                    date: Self.dayKey(for: workout.startedAt),
                     kind: workout.kind.rawValue,
                     durationMinutes: max(1, Int(endedAt.timeIntervalSince(workout.startedAt) / 60)),
                     workingSets: workout.completedSetCount,
@@ -373,14 +533,19 @@ final class CoachSyncService: ObservableObject, CoachSyncing {
 
     private static let isoFormatter = ISO8601DateFormatter()
 
-    private static let dayFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = .current
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
-    }()
+    /// `TimeZone.current` read once into a static formatter freezes the zone for the
+    /// life of the process, so after a flight every session and weight date shipped
+    /// to the coach was still stamped in the home zone. Reading `Calendar.current`
+    /// per call tracks the device, and matches how the widget builds its day key.
+    static func dayKey(for date: Date, calendar: Calendar = .current) -> String {
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(
+            format: "%04d-%02d-%02d",
+            components.year ?? 0,
+            components.month ?? 0,
+            components.day ?? 0
+        )
+    }
 }
 
 enum CoachSyncError: LocalizedError {
@@ -398,7 +563,13 @@ enum CoachSyncError: LocalizedError {
 }
 
 final class CoachSyncKeychain {
-    private let service = "com.rohansingh.today.coach-sync"
+    private let service: String
+
+    /// The service name is injectable purely so tests never touch, overwrite, or
+    /// delete the real pairing secret.
+    init(service: String = "com.rohansingh.today.coach-sync") {
+        self.service = service
+    }
 
     func save(_ data: Data, account: String) throws {
         let query: [String: Any] = [
