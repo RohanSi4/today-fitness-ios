@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { SiteHeader } from "@/components/site-header";
 import "./globals.css";
 
 const geist = Geist({
@@ -13,14 +14,21 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Health Recap | Interactive demo",
-  description: "A private daily recap for sleep and movement, built for Apple Health.",
+  title: {
+    default: "Today | Train with context",
+    template: "%s | Today",
+  },
+  description:
+    "A focused iPhone training companion for planning, logging, and learning from your lifting, running, sleep, and movement.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" className={`${geist.variable} ${geistMono.variable}`}>
-      <body>{children}</body>
+      <body>
+        <SiteHeader />
+        {children}
+      </body>
     </html>
   );
 }

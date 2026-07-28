@@ -40,7 +40,7 @@ export function RecapDemo() {
       <div className="device-wrap">
         <div className="device" aria-live="polite">
           <div className="device-bar"><span>9:41</span><span className="dynamic-island" /><span aria-hidden="true">● ◔</span></div>
-          <div className="app-bar"><span>Health Recap</span><button type="button" aria-label="Demo options" disabled>•••</button></div>
+          <div className="app-bar"><span>Sleep recap</span><button type="button" aria-label="Demo options" disabled>•••</button></div>
           <div className="sample-pill"><span aria-hidden="true">✦</span><span><strong>Sample data</strong> Private demo day</span></div>
 
           <article className="hero-card">
@@ -50,7 +50,7 @@ export function RecapDemo() {
               <div>
                 <h3>{recap.status}</h3>
                 <p>You slept {recap.sleep} with {recap.efficiency} efficiency.</p>
-                <strong>↗ {recap.comparison}</strong>
+                <strong>Compared with your recent baseline: {recap.comparison}</strong>
               </div>
             </div>
           </article>
