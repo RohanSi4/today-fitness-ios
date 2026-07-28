@@ -199,6 +199,11 @@ struct WeeklySnapshotView: View {
 struct WeeklySnapshotCard: View {
     let snapshot: WeeklyTrainingSnapshot
 
+    /// Defaults to true so every existing call site and preview reads the same as
+    /// before. Passed as false only when Apple Health has never been read, which
+    /// is when the mileage below is a guess rather than a total.
+    var runDataIsTrustworthy = true
+
     var body: some View {
         VStack(alignment: .leading, spacing: 13) {
             HStack {
@@ -213,12 +218,19 @@ struct WeeklySnapshotCard: View {
             HStack(alignment: .firstTextBaseline) {
                 Text("\(formatMiles(snapshot.completedMiles))")
                     .font(.title2.monospacedDigit().weight(.bold))
+                    .foregroundStyle(runDataIsTrustworthy ? .primary : .secondary)
                 Text("of \(formatMiles(snapshot.prescribedMiles)) miles")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 Spacer()
                 Text("\(snapshot.completedLifts) lift\(snapshot.completedLifts == 1 ? "" : "s")")
                     .font(.subheadline.monospacedDigit().weight(.semibold))
+            }
+
+            if !runDataIsTrustworthy {
+                Label("Runs not read from Apple Health yet", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             HStack(spacing: 7) {
@@ -242,6 +254,7 @@ struct WeeklySnapshotCard: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
             "This week, \(formatMiles(snapshot.completedMiles)) of \(formatMiles(snapshot.prescribedMiles)) miles and \(snapshot.completedLifts) lifts"
+                + (runDataIsTrustworthy ? "" : ". Runs have not been read from Apple Health yet.")
         )
         .accessibilityIdentifier("weekly-snapshot-card")
     }

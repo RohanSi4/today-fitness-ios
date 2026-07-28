@@ -15,6 +15,11 @@ final class ExerciseCatalog: ObservableObject {
 
     private var byID: [String: ExerciseDefinition] = [:]
 
+    /// `exercises` with the hand-mapped rows ahead of the imported ones, each half
+    /// still alphabetical. Cached rather than sorted per keystroke, and rebuilt by
+    /// `rebuildIndex` alongside `byID` so it can never drift from the list.
+    private(set) var curatedFirst: [ExerciseDefinition] = []
+
     private let cacheURL: URL
     private let session: URLSession
     private let sourceURL = URL(
@@ -123,11 +128,20 @@ final class ExerciseCatalog: ObservableObject {
 
     private func rebuildIndex() {
         byID = Dictionary(exercises.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        // `exercises` is already alphabetical, and a stable partition keeps each
+        // half that way without a second sort.
+        curatedFirst = exercises.filter { !Self.isImported($0) }
+            + exercises.filter { Self.isImported($0) }
     }
 
     func search(_ query: String) -> [ExerciseDefinition] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !trimmed.isEmpty else { return Array(exercises.prefix(80)) }
+        // Browsing, not searching. `exercises` is one alphabetical list of curated
+        // and imported rows together, so the first eighty were whatever sorts
+        // near "A" - "3/4 Sit-Up", "Air Bike", "Advanced Kettlebell Windmill" -
+        // and the hand-mapped catalog was nowhere in sight. Ranked search already
+        // put curated first; browse now agrees with it.
+        guard !trimmed.isEmpty else { return Array(curatedFirst.prefix(80)) }
         let tokens = trimmed.split(separator: " ").map(String.init)
         return exercises
             .filter { exercise in tokens.allSatisfy { exercise.searchText.contains($0) } }

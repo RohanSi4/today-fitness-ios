@@ -31,10 +31,15 @@ final class TodayStore: ObservableObject {
     private(set) var permitsExternalCoachSync: Bool
     private var pendingPersistTask: Task<Void, Never>?
 
+    /// Read when a template builds its starting exercises, so a workout opens on
+    /// the makers he already picked instead of on unbranded rows he has to fix.
+    private let brandPreferences: BrandPreferences
+
     init(
         storageURL: URL? = nil,
         calendar: Calendar = .current,
-        syncService: (any CoachSyncing)? = nil
+        syncService: (any CoachSyncing)? = nil,
+        brandPreferences: BrandPreferences? = nil
     ) {
         self.calendar = calendar
         if let syncService {
@@ -46,6 +51,17 @@ final class TodayStore: ObservableObject {
         } else {
             self.syncService = DisabledCoachSync()
             permitsExternalCoachSync = false
+        }
+        // Same rule the sync service follows: a store pointed at its own file is
+        // a test store, and must not read or write the real preference map.
+        if let brandPreferences {
+            self.brandPreferences = brandPreferences
+        } else if storageURL == nil {
+            self.brandPreferences = .shared
+        } else {
+            self.brandPreferences = BrandPreferences(
+                defaults: UserDefaults(suiteName: "today.test.\(UUID().uuidString)") ?? .standard
+            )
         }
         self.storageURL = storageURL ?? Self.defaultStorageURL
         load()
@@ -217,11 +233,35 @@ final class TodayStore: ObservableObject {
         }
 
         return ids.map { exerciseID in
+            let resolved = brandedID(for: exerciseID, catalog: catalog)
             return LoggedExercise(
-                exerciseID: exerciseID,
-                sets: starterSets(for: exerciseID, catalog: catalog)
+                exerciseID: resolved,
+                // Not `starterSets` directly. That only looks up the exact id, so
+                // the first session on a newly chosen maker opened on catalog
+                // defaults with his real numbers sitting one id away. These rules
+                // borrow the unbranded history once, then let the two diverge.
+                sets: BrandedStarterRules.starter(
+                    for: resolved,
+                    history: self,
+                    catalog: catalog
+                ).sets
             )
         }
+    }
+
+    /// The id a template row should open on, once his remembered maker is applied.
+    ///
+    /// A deliberate choice always wins, including a deliberate "No brand", because
+    /// the preference is the most recent thing he actually said. With no choice on
+    /// record the id is left exactly as it came in, so a brand carried by the
+    /// previous session is never silently stripped.
+    private func brandedID(for exerciseID: String, catalog: ExerciseCatalog) -> String {
+        guard brandPreferences.hasChoice(for: exerciseID) else { return exerciseID }
+        let brand = brandPreferences.lastBrand(for: exerciseID)
+        let qualified = catalog.qualifiedID(for: exerciseID, brand: brand)
+        // `qualifiedID` refuses a maker the movement does not accept, so a barbell
+        // row cannot pick up a brand from a stale preference.
+        return catalog.exercise(id: qualified) != nil ? qualified : exerciseID
     }
 
     /// Why a read failed, because "no bytes" and "bad bytes" need opposite responses.

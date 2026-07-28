@@ -31,15 +31,18 @@ struct ExercisePickerView: View {
         NavigationStack {
             Group {
                 if searchResults.isEmpty, recentExercises.isEmpty {
-                    // Searching 700+ exercises and getting a blank list read as a
-                    // broken screen: there was no empty state and no sign the
+                    // Searching the whole catalog and getting a blank list read as
+                    // a broken screen: there was no empty state and no sign the
                     // catalog was still downloading.
                     emptyState
                 } else {
                     list
                 }
             }
-            .searchable(text: $query, prompt: "Search 700+ exercises")
+            // Counted, not hard-coded. "Search 700+ exercises" was written when the
+            // imported list was all there was, and it stayed on screen after the
+            // catalog grew, which made the number decoration rather than fact.
+            .searchable(text: $query, prompt: searchPrompt)
             .navigationTitle("Add exercises")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -88,6 +91,14 @@ struct ExercisePickerView: View {
         } else {
             ContentUnavailableView.search(text: query)
         }
+    }
+
+    /// Rounded down to the nearest fifty so the prompt does not flicker between
+    /// two numbers when the remote import lands mid-session.
+    private var searchPrompt: String {
+        let count = catalog.exercises.count
+        guard count >= 50 else { return "Search exercises" }
+        return "Search \(count / 50 * 50)+ exercises"
     }
 
     private var recentExercises: [ExerciseDefinition] {

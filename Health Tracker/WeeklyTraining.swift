@@ -30,6 +30,16 @@ final class RunningWorkoutService: ObservableObject {
     @Published private(set) var workouts: [RunningWorkoutSummary] = []
     @Published private(set) var lastUpdated: Date?
 
+    /// True when the last read of Apple Health failed or was refused.
+    ///
+    /// `refresh` used to drop the error on the floor with `try?`, which left the
+    /// week showing a confident "0 of 26.1 miles". That is the same failure the
+    /// widget had: nothing on screen distinguished an unread Health store from a
+    /// week he genuinely did not run. Only meaningful while `workouts` is still
+    /// empty, since a later failure keeps the last good list rather than
+    /// clearing it.
+    @Published private(set) var lastReadFailed = false
+
     private let healthStore: any RunningWorkoutProviding
     private var isMonitoring = false
 
@@ -63,12 +73,23 @@ final class RunningWorkoutService: ObservableObject {
         let startOfToday = calendar.startOfDay(for: .now)
         let start = calendar.date(byAdding: .day, value: -14, to: startOfToday) ?? startOfToday
         let end = Date().addingTimeInterval(60)
-        guard let fetched = try? await healthStore.fetchRunningWorkouts(start: start, end: end) else {
-            return
+        do {
+            let fetched = try await healthStore.fetchRunningWorkouts(start: start, end: end)
+            workouts = fetched.sorted { $0.startedAt > $1.startedAt }
+            lastUpdated = .now
+            lastReadFailed = false
+        } catch {
+            // The list is deliberately left alone. Stale runs beat blank ones,
+            // and the flag is what tells the week not to claim a zero.
+            lastReadFailed = true
         }
-        workouts = fetched.sorted { $0.startedAt > $1.startedAt }
-        lastUpdated = .now
     }
+
+    /// Whether the week's run totals should be presented as fact.
+    ///
+    /// False only when nothing has ever been read successfully, which is the one
+    /// case where a zero on screen is a guess rather than a number.
+    var hasTrustworthyRunData: Bool { !(lastReadFailed && lastUpdated == nil) }
 }
 
 struct WeeklyDaySnapshot: Identifiable, Equatable {

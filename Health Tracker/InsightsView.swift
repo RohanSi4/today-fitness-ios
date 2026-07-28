@@ -224,7 +224,8 @@ struct InsightsView: View {
                     plan: planService.plan,
                     runs: runService.workouts,
                     lifts: store.workouts
-                )
+                ),
+                runDataIsTrustworthy: runService.hasTrustworthyRunData
             )
         }
         .buttonStyle(.plain)

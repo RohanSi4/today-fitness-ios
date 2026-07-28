@@ -35,7 +35,10 @@ struct TodayView: View {
                         runService: runService
                     )
                 } label: {
-                    WeeklySnapshotCard(snapshot: weeklySnapshot)
+                    WeeklySnapshotCard(
+                        snapshot: weeklySnapshot,
+                        runDataIsTrustworthy: runService.hasTrustworthyRunData
+                    )
                 }
                 .buttonStyle(.plain)
                 workoutCard
