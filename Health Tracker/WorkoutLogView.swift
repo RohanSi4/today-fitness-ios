@@ -65,7 +65,14 @@ struct WorkoutLogView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(spacing: 16) {
-                        watchReminder
+                        // A "start your Watch" prompt only makes sense before
+                        // the session starts, and it was holding a full card at
+                        // the top of the screen for every scroll of every
+                        // workout. Once a set is down, the recording decision is
+                        // already made.
+                        if draft.completedSetCount == 0 {
+                            watchReminder
+                        }
                         liveMuscleMap
 
                         if draft.exercises.isEmpty {

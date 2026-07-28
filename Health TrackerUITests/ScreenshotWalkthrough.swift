@@ -76,6 +76,21 @@ final class ScreenshotWalkthrough: XCTestCase {
         return dismissedAny
     }
 
+    /// History on its own. The full walkthrough reaches it only after the
+    /// workout flow, so any flake earlier in that run costs the History
+    /// screenshot too — which is how the month grouping, the trained-regions
+    /// line, and the weight deltas all shipped unlooked-at.
+    @MainActor
+    func testCaptureHistory() throws {
+        let app = launched()
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 10))
+        dismissHealthSheet(deny: true, timeout: 4)
+        XCTAssertTrue(app.tabBars.buttons["History"].waitForExistence(timeout: 5))
+        app.tabBars.buttons["History"].tap()
+        Thread.sleep(forTimeInterval: 2)
+        shoot(app, "14-history")
+    }
+
     @MainActor
     func testCaptureTheChangedScreens() throws {
         let app = launched()
@@ -182,6 +197,25 @@ final class ScreenshotWalkthrough: XCTestCase {
                 Thread.sleep(forTimeInterval: 1.5)
                 shoot(app, "13-exercise-search")
             }
+        }
+
+        // History, which had no capture at all — so the month grouping, the
+        // trained-regions line, and the weight deltas were never looked at.
+        for label in ["Cancel", "Close"] where app.buttons[label].firstMatch.exists {
+            app.buttons[label].firstMatch.tap()
+            Thread.sleep(forTimeInterval: 1)
+        }
+        if app.buttons["close-workout-button"].exists {
+            app.buttons["close-workout-button"].tap()
+            Thread.sleep(forTimeInterval: 1.5)
+        }
+        // Closing the logger can raise the Health sheet again, which is a
+        // separate process and will happily sit on top of the screenshot.
+        dismissHealthSheet(deny: true, timeout: 4)
+        if app.tabBars.buttons["History"].waitForExistence(timeout: 3) {
+            app.tabBars.buttons["History"].tap()
+            Thread.sleep(forTimeInterval: 1.5)
+            shoot(app, "14-history")
         }
     }
 }

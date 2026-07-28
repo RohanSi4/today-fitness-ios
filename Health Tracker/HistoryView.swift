@@ -68,19 +68,25 @@ struct HistoryView: View {
 
     private var list: some View {
         List {
-            if !store.workouts.isEmpty {
-                Section("Workouts") {
-                    ForEach(store.workouts) { session in
+            // Grouped by month. One flat "Workouts" section was an
+            // undifferentiated scroll, so finding a session meant remembering
+            // roughly how far down it was rather than when it happened.
+            ForEach(workoutMonths, id: \.title) { month in
+                Section(month.title) {
+                    ForEach(month.sessions) { session in
                         NavigationLink {
                             WorkoutDetailView(session: session, store: store, catalog: catalog)
                         } label: {
-                            WorkoutHistoryRow(session: session)
+                            WorkoutHistoryRow(session: session, regions: regionSummary(for: session))
                         }
                     }
                     .onDelete { offsets in
+                        // Offsets are per-section now, so they index the month's
+                        // own array — reading store.workouts here would delete
+                        // the wrong session in every month but the first.
                         guard let index = offsets.first,
-                              store.workouts.indices.contains(index) else { return }
-                        pendingWorkoutDeletion = store.workouts[index]
+                              month.sessions.indices.contains(index) else { return }
+                        pendingWorkoutDeletion = month.sessions[index]
                     }
                 }
             }
@@ -105,24 +111,92 @@ struct HistoryView: View {
                         appState.presentedSheet = .weight
                     }
                 } else {
-                    ForEach(store.weights) { entry in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(entry.date.formatted(.dateTime.weekday(.abbreviated).month().day()))
-                                    .font(.subheadline.weight(.semibold))
-                                Text(entry.healthKitID == nil ? "Local entry" : "Apple Health")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Text("\(entry.pounds.formatted(.number.precision(.fractionLength(1)))) lb")
-                                .font(.headline.monospacedDigit())
-                        }
-                        .accessibilityElement(children: .combine)
+                    ForEach(Array(store.weights.enumerated()), id: \.element.id) { index, entry in
+                        // `weights` is newest-first, so the next element is the
+                        // previous morning.
+                        weightRow(entry, previous: store.weights.indices.contains(index + 1)
+                            ? store.weights[index + 1]
+                            : nil)
                     }
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func weightRow(_ entry: WeightEntry, previous: WeightEntry?) -> some View {
+        let change = previous.map { entry.pounds - $0.pounds }
+        HStack {
+            Text(entry.date.formatted(.dateTime.weekday(.abbreviated).month().day()))
+                .font(.subheadline.weight(.semibold))
+            Spacer()
+            // "Local entry" / "Apple Health" was plumbing — it told him where a
+            // number came from, which he never needs, in the space where the
+            // useful thing is which way it moved. Direction only: the app shows
+            // the trend and does not editorialise about it.
+            if let change, abs(change) >= 0.05 {
+                Label(
+                    abs(change).formatted(.number.precision(.fractionLength(1))),
+                    systemImage: change < 0 ? "arrow.down" : "arrow.up"
+                )
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .labelStyle(.titleAndIcon)
+            }
+            Text("\(entry.pounds.formatted(.number.precision(.fractionLength(1)))) lb")
+                .font(.headline.monospacedDigit())
+                .frame(minWidth: 74, alignment: .trailing)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(weightAccessibilityLabel(entry, change: change))
+    }
+
+    private func weightAccessibilityLabel(_ entry: WeightEntry, change: Double?) -> String {
+        let base = "\(entry.date.formatted(.dateTime.weekday(.wide).month().day())), \(entry.pounds.formatted(.number.precision(.fractionLength(1)))) pounds"
+        guard let change, abs(change) >= 0.05 else { return base }
+        let direction = change < 0 ? "down" : "up"
+        return "\(base), \(direction) \(abs(change).formatted(.number.precision(.fractionLength(1)))) from the previous entry"
+    }
+
+    private struct WorkoutMonth {
+        let title: String
+        let sessions: [WorkoutSession]
+    }
+
+    private var workoutMonths: [WorkoutMonth] {
+        let calendar = Calendar.current
+        let grouped = Dictionary(grouping: store.workouts) { session in
+            calendar.date(from: calendar.dateComponents([.year, .month], from: session.startedAt)) ?? session.startedAt
+        }
+        return grouped.keys.sorted(by: >).map { start in
+            WorkoutMonth(
+                title: start.formatted(.dateTime.month(.wide).year()),
+                sessions: (grouped[start] ?? []).sorted { $0.startedAt > $1.startedAt }
+            )
+        }
+    }
+
+    /// What a session actually trained, so history answers "when did I last do
+    /// legs" instead of only "when did I lift". Uses the same region rollup the
+    /// training pulse does, and only counts a muscle the exercise really loads.
+    private func regionSummary(for session: WorkoutSession) -> String {
+        var load: [TrainingRegion: Double] = [:]
+        for logged in session.exercises {
+            guard let exercise = catalog.exercise(id: logged.exerciseID) else { continue }
+            let sets = logged.sets.filter(\.isPerformed).count
+            guard sets > 0 else { continue }
+            for contribution in exercise.muscles where contribution.intensity >= 0.5 {
+                load[TrainingRegion.region(for: contribution.muscle), default: 0] += Double(sets) * contribution.intensity
+            }
+        }
+        // Two, not three: with the day in front of it a third region truncated
+        // mid-word ("Fri 24 · Quads · Calves · Hamstri…"), and the third is the
+        // least informative of the three anyway.
+        return load
+            .sorted { $0.value == $1.value ? $0.key.rawValue < $1.key.rawValue : $0.value > $1.value }
+            .prefix(2)
+            .map(\.key.rawValue)
+            .joined(separator: " · ")
     }
 
     private var deletionConfirmation: Binding<Bool> {
@@ -141,6 +215,12 @@ struct HistoryView: View {
 
 private struct WorkoutHistoryRow: View {
     let session: WorkoutSession
+    let regions: String
+
+    private var subtitle: String {
+        let day = session.startedAt.formatted(.dateTime.weekday(.abbreviated).day())
+        return regions.isEmpty ? day : "\(day) · \(regions)"
+    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -151,9 +231,12 @@ private struct WorkoutHistoryRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(session.kind.workoutTitle)
                     .font(.subheadline.weight(.semibold))
-                Text(session.startedAt.formatted(.dateTime.month().day().hour().minute()))
+                // The month is the section header, so the row only needs the day
+                // — which frees the rest of the line for what was trained.
+                Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 3) {
