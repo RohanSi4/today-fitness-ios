@@ -25,6 +25,9 @@ struct TodayView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 header
+                if store.activeWorkout != nil {
+                    workoutCard
+                }
                 weightPrompt
                 planCard
                 stretchesCard
@@ -41,7 +44,9 @@ struct TodayView: View {
                     )
                 }
                 .buttonStyle(.plain)
-                workoutCard
+                if store.activeWorkout == nil {
+                    workoutCard
+                }
                 if day?.isRestOnly == true {
                     RecoveryPreviewCard()
                 }
@@ -65,11 +70,27 @@ struct TodayView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(Date.now.formatted(.dateTime.weekday(.wide).month(.wide).day()))
                 .font(.title2.weight(.bold))
-            Text("One place for what matters today.")
+            Text(headerContext)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var headerContext: String {
+        if let active = store.activeWorkout {
+            return "\(active.kind.title) in progress · keep the next set simple"
+        }
+        if todayProgress?.isFullyComplete == true {
+            return "Plan complete · recovery and tomorrow are already in view"
+        }
+        if day?.isRestOnly == true {
+            return "Recovery day · keep movement easy"
+        }
+        if let kind = day?.workoutKind {
+            return "\(kind.title) is on deck"
+        }
+        return "Your plan, training, and recovery context"
     }
 
     private var weightPrompt: some View {
