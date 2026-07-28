@@ -15,11 +15,21 @@ struct WorkoutLogView: View {
 
     private static let finishButtonID = "finish-workout"
 
+    /// `brandPreferences` is required for the same reason as
+    /// `ExercisePickerView.init`: defaulting it to the `@MainActor`
+    /// `BrandPreferences.shared` is an error under the Swift 6 language mode,
+    /// and `@MainActor` on the init does not silence it because the default
+    /// expression is type-checked outside that isolation. Callers are SwiftUI
+    /// bodies, which are already main-actor, so passing it is free there.
+    ///
+    /// This init also reads `store.activeWorkout`, so it was only ever correct
+    /// on the main actor to begin with.
+    @MainActor
     init(
         store: TodayStore,
         catalog: ExerciseCatalog,
         kind: WorkoutKind,
-        brandPreferences: BrandPreferences = .shared
+        brandPreferences: BrandPreferences
     ) {
         self.store = store
         self.catalog = catalog

@@ -12,9 +12,16 @@ struct ExercisePickerView: View {
     @State private var query = ""
     @State private var addedIDs: Set<String>
 
+    /// `brandPreferences` is required rather than defaulted to
+    /// `BrandPreferences.shared`. A default argument is evaluated at the call
+    /// site but type-checked outside the init's isolation, so defaulting it to a
+    /// `@MainActor` singleton is a warning today and a hard error under the
+    /// Swift 6 language mode. Marking the init `@MainActor` does not fix it.
+    /// The only caller already passed this explicitly, so the default was doing
+    /// nothing except hiding which preferences object a picker is reading.
     init(
         catalog: ExerciseCatalog,
-        brandPreferences: BrandPreferences = .shared,
+        brandPreferences: BrandPreferences,
         selectedIDs: Set<String>,
         recentIDs: [String],
         onSelect: @escaping (ExerciseDefinition) -> Void

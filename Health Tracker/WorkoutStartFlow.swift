@@ -7,7 +7,14 @@ struct WorkoutStartFlow: View {
 
     var body: some View {
         if let active = store.activeWorkout {
-            WorkoutLogView(store: store, catalog: catalog, kind: active.kind)
+            // `.shared` is read here rather than defaulted inside the init,
+            // because a SwiftUI body is already main-actor and the init is not.
+            WorkoutLogView(
+                store: store,
+                catalog: catalog,
+                kind: active.kind,
+                brandPreferences: .shared
+            )
         } else {
             WorkoutTypePicker(
                 store: store,

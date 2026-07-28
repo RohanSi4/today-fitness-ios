@@ -1,8 +1,55 @@
 import XCTest
 
 final class Health_TrackerUITests: XCTestCase {
+    @MainActor
     override func setUpWithError() throws {
         continueAfterFailure = false
+
+        // Device orientation is simulator state, not process state: it outlives
+        // the test run that set it. `Health_TrackerUITestsLaunchTests` has
+        // `runsForEachTargetApplicationUIConfiguration = true`, which includes
+        // landscape, and the app declares no supported orientations, so it
+        // happily rotates. The run therefore *ends* in landscape and poisons the
+        // next one - four tests here failed on a 956x440 window with the
+        // controls they tap pushed below the fold, having passed minutes before
+        // on identical code.
+        //
+        // These screens are designed portrait, so pinning it is both the honest
+        // precondition and the thing that makes the suite reproducible.
+        XCUIDevice.shared.orientation = .portrait
+    }
+
+    /// The app is portrait only, declared in build settings rather than at
+    /// runtime, which means nothing in the Swift sources mentions it and a stray
+    /// edit to the project file would go unnoticed. This is the guard.
+    ///
+    /// It is also the root cause of the flakiness the `setUpWithError` note
+    /// describes: while landscape was allowed, the launch test's rotation
+    /// outlived the run and broke the next one.
+    @MainActor
+    func testTheAppStaysPortraitWhenTheDeviceIsRotated() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-useMockData", "true"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 5))
+
+        let portrait = app.windows.firstMatch.frame
+        XCTAssertGreaterThan(portrait.height, portrait.width, "did not start portrait")
+
+        defer { XCUIDevice.shared.orientation = .portrait }
+        for orientation in [UIDeviceOrientation.landscapeLeft, .landscapeRight] {
+            XCUIDevice.shared.orientation = orientation
+            // The rotation is animated and the device may honour it even when the
+            // app does not, so settle before measuring the app's own window.
+            Thread.sleep(forTimeInterval: 1.5)
+
+            let frame = app.windows.firstMatch.frame
+            XCTAssertGreaterThan(
+                frame.height,
+                frame.width,
+                "app rotated to \(orientation.rawValue); it is meant to be portrait only"
+            )
+        }
     }
 
     @MainActor

@@ -9,8 +9,13 @@ import XCTest
 /// meaningfully in CI. Run it with
 /// `-only-testing:"Health TrackerUITests/ScreenshotWalkthrough"`.
 final class ScreenshotWalkthrough: XCTestCase {
+    @MainActor
     override func setUpWithError() throws {
         continueAfterFailure = true
+        // See the note in `Health_TrackerUITests`. A landscape simulator left
+        // over from a previous run would silently produce a folder of
+        // screenshots of a layout he never uses.
+        XCUIDevice.shared.orientation = .portrait
     }
 
     private func shoot(_ app: XCUIApplication, _ name: String) {
