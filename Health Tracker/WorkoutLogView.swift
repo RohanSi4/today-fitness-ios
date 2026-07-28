@@ -4,6 +4,7 @@ struct WorkoutLogView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: TodayStore
     @ObservedObject var catalog: ExerciseCatalog
+    @ObservedObject var brandPreferences: BrandPreferences
 
     let kind: WorkoutKind
     @State private var draft: WorkoutSession
@@ -14,9 +15,15 @@ struct WorkoutLogView: View {
 
     private static let finishButtonID = "finish-workout"
 
-    init(store: TodayStore, catalog: ExerciseCatalog, kind: WorkoutKind) {
+    init(
+        store: TodayStore,
+        catalog: ExerciseCatalog,
+        kind: WorkoutKind,
+        brandPreferences: BrandPreferences = .shared
+    ) {
         self.store = store
         self.catalog = catalog
+        self.brandPreferences = brandPreferences
         self.kind = kind
         _draft = State(initialValue: store.activeWorkout ?? WorkoutSession(
             kind: kind,
@@ -84,17 +91,13 @@ struct WorkoutLogView: View {
             .sheet(isPresented: $showingExercisePicker) {
                 ExercisePickerView(
                     catalog: catalog,
-                    selectedIDs: Set(draft.exercises.map(\.exerciseID)),
+                    brandPreferences: brandPreferences,
+                    // Base ids, because "Lat pulldown" is already in this
+                    // workout whichever maker's version of it was added.
+                    selectedIDs: Set(draft.exercises.map(\.baseExerciseID)),
                     recentIDs: recentExerciseIDs
                 ) { exercise in
-                    withAnimation(.snappy) {
-                        draft.exercises.append(
-                            LoggedExercise(
-                                exerciseID: exercise.id,
-                                sets: store.starterSets(for: exercise.id, catalog: catalog)
-                            )
-                        )
-                    }
+                    withAnimation(.snappy) { add(exercise) }
                 }
             }
             .confirmationDialog(
@@ -122,8 +125,14 @@ struct WorkoutLogView: View {
             if let exercise = catalog.exercise(id: loggedExercise.exerciseID) {
                 ExerciseLogCard(
                     exercise: exercise,
+                    baseName: baseName(for: loggedExercise, resolved: exercise),
                     loggedExercise: $loggedExercise,
                     history: store.lastPerformance(for: exercise.id),
+                    brandOptions: catalog.brands(for: loggedExercise.exerciseID),
+                    isUsingCarriedOverHistory: BrandedStarterRules.isUsingCarriedOverHistory(
+                        exerciseID: loggedExercise.exerciseID,
+                        history: store
+                    ),
                     canMoveUp: draft.exercises.first?.id != loggedExercise.id,
                     canMoveDown: draft.exercises.last?.id != loggedExercise.id,
                     onMoveUp: { moveExercise(loggedExercise.id, by: -1) },
@@ -139,6 +148,9 @@ struct WorkoutLogView: View {
                         let target: AnyHashable = nextExerciseID(after: loggedExercise.id)
                             .map(AnyHashable.init) ?? AnyHashable(Self.finishButtonID)
                         withAnimation(.snappy) { proxy.scrollTo(target, anchor: .top) }
+                    },
+                    onSelectBrand: { brand in
+                        setBrand(brand, on: loggedExercise.id)
                     }
                 )
                 .id(loggedExercise.id)
@@ -269,15 +281,62 @@ struct WorkoutLogView: View {
         return count == 1 ? "1 area hit so far" : "\(count) areas hit so far"
     }
 
+    /// Base ids on purpose. Recent should offer the movement, and the remembered
+    /// maker is applied when it is tapped, so the same lift does not appear
+    /// three times because it was logged on three machines.
     private var recentExerciseIDs: [String] {
         var seen = Set<String>()
         return store.workouts
             .sorted { $0.startedAt > $1.startedAt }
             .flatMap(\.exercises)
-            .map(\.exerciseID)
+            .map(\.baseExerciseID)
             .filter { seen.insert($0).inserted }
             .prefix(10)
             .map { $0 }
+    }
+
+    /// The movement's name with no maker on it, since the brand has its own chip.
+    private func baseName(for logged: LoggedExercise, resolved: ExerciseDefinition) -> String {
+        guard logged.brand != nil else { return resolved.name }
+        return catalog.exercise(id: logged.baseExerciseID)?.name ?? resolved.name
+    }
+
+    private func add(_ exercise: ExerciseDefinition) {
+        let brand = brandPreferences.lastBrand(for: exercise.baseID)
+        let exerciseID = catalog.qualifiedID(for: exercise.id, brand: brand)
+        let starter = BrandedStarterRules.starter(
+            for: exerciseID,
+            history: store,
+            catalog: catalog
+        )
+        draft.exercises.append(
+            LoggedExercise(exerciseID: exerciseID, sets: starter.sets)
+        )
+    }
+
+    /// Changing maker part-way through keeps every set already logged.
+    ///
+    /// `LoggedExercise.exerciseID` is a `let`, so the row is rebuilt rather than
+    /// mutated. Reusing the same `id` keeps SwiftUI's identity, which keeps the
+    /// card's expanded state and the sets exactly as they are. Refusing the
+    /// change would mean deleting the exercise and re-adding it, which loses the
+    /// work; and realising halfway through that you are on the Cybex rather than
+    /// the Life Fitness is a correction, not a falsification, because the sets
+    /// really were done on the machine you are standing at.
+    private func setBrand(_ brand: EquipmentBrand?, on loggedID: UUID) {
+        guard let index = draft.exercises.firstIndex(where: { $0.id == loggedID }) else { return }
+        let existing = draft.exercises[index]
+        let exerciseID = catalog.qualifiedID(for: existing.baseExerciseID, brand: brand)
+        guard exerciseID != existing.exerciseID else { return }
+
+        brandPreferences.remember(brand, for: existing.baseExerciseID)
+        withAnimation(.snappy) {
+            draft.exercises[index] = LoggedExercise(
+                id: existing.id,
+                exerciseID: exerciseID,
+                sets: existing.sets
+            )
+        }
     }
 
     private func finishWorkout() {
