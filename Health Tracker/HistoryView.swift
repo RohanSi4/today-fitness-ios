@@ -5,7 +5,45 @@ struct HistoryView: View {
     @ObservedObject var store: TodayStore
     @ObservedObject var catalog: ExerciseCatalog
 
+    private var isEmpty: Bool {
+        store.workouts.isEmpty && store.weights.isEmpty && store.dataRecoveryMessage == nil
+    }
+
     var body: some View {
+        Group {
+            if isEmpty {
+                // The screen used to render as a lone "Weight" header with one
+                // button under it, which reads as a bug rather than a new app.
+                ContentUnavailableView {
+                    Label("Nothing logged yet", systemImage: "clock.arrow.circlepath")
+                } description: {
+                    Text("Finished workouts and morning weights collect here.")
+                } actions: {
+                    Button("Log your first weight") {
+                        appState.presentedSheet = .weight
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            } else {
+                list
+            }
+        }
+        .navigationTitle("History")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button("Backdate weight", systemImage: "calendar.badge.plus") {
+                        appState.presentedSheet = .weight
+                    }
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel("Add an entry")
+            }
+        }
+    }
+
+    private var list: some View {
         List {
             if !store.workouts.isEmpty {
                 Section("Workouts") {
@@ -58,19 +96,8 @@ struct HistoryView: View {
                             Text("\(entry.pounds.formatted(.number.precision(.fractionLength(1)))) lb")
                                 .font(.headline.monospacedDigit())
                         }
+                        .accessibilityElement(children: .combine)
                     }
-                }
-            }
-        }
-        .navigationTitle("History")
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Button("Backdate weight", systemImage: "calendar.badge.plus") {
-                        appState.presentedSheet = .weight
-                    }
-                } label: {
-                    Image(systemName: "plus")
                 }
             }
         }
@@ -115,9 +142,9 @@ private struct WorkoutDetailView: View {
         ScrollView {
             VStack(spacing: 16) {
                 HStack(spacing: 10) {
-                    historyMetric(session.completedExerciseCount, "exercises")
-                    historyMetric(session.completedSetCount, "sets")
-                    historyMetric(session.durationLabel ?? "In progress", "time")
+                    StatTile(session.completedExerciseCount, "exercises")
+                    StatTile(session.completedSetCount, "sets")
+                    StatTile(session.durationLabel ?? "In progress", "time")
                 }
 
                 MuscleMapView(scores: store.muscleScores(for: session, catalog: catalog), compact: true)
@@ -133,12 +160,14 @@ private struct WorkoutDetailView: View {
                                 HStack {
                                     Text("Set \(index + 1)").foregroundStyle(.secondary)
                                     Spacer()
-                                    Text(setText(set, exercise: exercise))
+                                    Text(SetSummary.text(for: set, exercise: exercise, includingUnit: true))
                                         .font(.subheadline.monospacedDigit().weight(.semibold))
                                 }
+                                .accessibilityElement(children: .combine)
                             }
                         }
                         .padding(16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .todayCard()
                     }
                 }
@@ -148,44 +177,5 @@ private struct WorkoutDetailView: View {
         .background(Color(.systemGroupedBackground))
         .navigationTitle(session.kind.workoutTitle)
         .navigationBarTitleDisplayMode(.inline)
-    }
-
-    private func setText(_ set: LoggedSet, exercise: ExerciseDefinition) -> String {
-        if exercise.loadMode == .bodyweight || set.weight == nil {
-            return "\(set.reps) reps"
-        }
-        return "\(set.weight!.formatted(.number.precision(.fractionLength(0...1)))) lb × \(set.reps)"
-    }
-
-    private func historyMetric(_ value: Int, _ label: String) -> some View {
-        historyMetric("\(value)", label)
-    }
-
-    private func historyMetric(_ value: String, _ label: String) -> some View {
-        VStack(spacing: 3) {
-            Text(value)
-                .font(.subheadline.monospacedDigit().weight(.bold))
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 12)
-        .todayCard()
-    }
-}
-
-private extension WorkoutSession {
-    var completedExerciseCount: Int {
-        exercises.filter { $0.sets.contains(where: \.isPerformed) }.count
-    }
-
-    var durationLabel: String? {
-        guard let endedAt else { return nil }
-        let minutes = max(1, Int(endedAt.timeIntervalSince(startedAt) / 60))
-        if minutes < 60 { return "\(minutes)m" }
-        return "\(minutes / 60)h \(minutes % 60)m"
     }
 }

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct ContentView: View {
     @EnvironmentObject private var appState: AppState
@@ -130,9 +131,32 @@ struct ContentView: View {
 }
 
 enum TodayPalette {
-    static let accent = Color(red: 0.16, green: 0.43, blue: 0.31)
-    static let muscle = Color(red: 0.86, green: 0.16, blue: 0.18)
-    static let warm = Color(red: 0.93, green: 0.43, blue: 0.18)
+    /// These were fixed sRGB values, which meant the deep green accent sat at
+    /// roughly the same luminance as the dark-mode card it is drawn on: buttons,
+    /// the tab bar tint and the weight trend line all but disappeared at night,
+    /// which is when a gym session actually gets logged. Each colour now carries
+    /// a lighter variant for dark mode.
+    static let accent = adaptive(
+        light: (red: 0.16, green: 0.43, blue: 0.31),
+        dark: (red: 0.36, green: 0.76, blue: 0.55)
+    )
+    static let muscle = adaptive(
+        light: (red: 0.86, green: 0.16, blue: 0.18),
+        dark: (red: 0.98, green: 0.42, blue: 0.42)
+    )
+    static let warm = adaptive(
+        light: (red: 0.93, green: 0.43, blue: 0.18),
+        dark: (red: 1.00, green: 0.62, blue: 0.35)
+    )
+
+    private typealias Components = (red: Double, green: Double, blue: Double)
+
+    private static func adaptive(light: Components, dark: Components) -> Color {
+        Color(UIColor { traits in
+            let value = traits.userInterfaceStyle == .dark ? dark : light
+            return UIColor(red: value.red, green: value.green, blue: value.blue, alpha: 1)
+        })
+    }
 }
 
 extension View {

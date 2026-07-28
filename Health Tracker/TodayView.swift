@@ -258,7 +258,7 @@ struct TodayView: View {
     }
 
     private func runSummary(_ run: RunningWorkoutSummary) -> String {
-        let miles = run.miles.formatted(.number.precision(.fractionLength(0...2)))
+        let miles = formatMiles(run.miles)
         let minutes = Int((run.duration / 60).rounded())
         guard let pace = run.paceSecondsPerMile else { return "\(miles) mi in \(minutes)m" }
         let paceMinutes = Int(pace) / 60
@@ -268,7 +268,7 @@ struct TodayView: View {
 
     private func watchButtonLabel(day: TrainingPlanDay, miles: Double) -> String {
         if watchWorkouts.state == .scheduled(day.date) { return "Run added to Apple Watch" }
-        return "Add \(miles.formatted(.number.precision(.fractionLength(0...2)))) mi to Apple Watch"
+        return "Add \(formatMiles(miles)) mi to Apple Watch"
     }
 
     private var workoutCard: some View {
