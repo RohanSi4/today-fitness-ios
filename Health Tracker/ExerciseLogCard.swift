@@ -4,17 +4,29 @@ import SwiftUI
 /// controls for reordering or dropping it.
 struct ExerciseLogCard: View {
     let exercise: ExerciseDefinition
+    /// The movement's name without any maker on it. The brand is shown as its
+    /// own chip, so repeating it in the title would just be noise.
+    let baseName: String
     @Binding var loggedExercise: LoggedExercise
     let history: [LoggedExercise]
+    /// Empty for anything where the maker does not change the load, which is how
+    /// a dumbbell curl never grows a brand step.
+    let brandOptions: [EquipmentBrand]
+    /// Set when this row's starting weights were borrowed from the movement's
+    /// unbranded history because this maker has none yet.
+    let isUsingCarriedOverHistory: Bool
     let canMoveUp: Bool
     let canMoveDown: Bool
     let onMoveUp: () -> Void
     let onMoveDown: () -> Void
     let onRemove: () -> Void
     let onFinished: () -> Void
+    let onSelectBrand: (EquipmentBrand?) -> Void
 
     @State private var showingHistory = false
     @State private var showingDetails = true
+
+    private var brand: EquipmentBrand? { loggedExercise.brand }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -50,11 +62,23 @@ struct ExerciseLogCard: View {
     private var header: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(exercise.name)
+                Text(baseName)
                     .font(.headline)
+                // Only ever rendered once a maker is actually chosen, so a card
+                // for a movement he does not care about the maker of looks
+                // exactly as it did before brands existed.
+                if brand != nil {
+                    brandChip
+                }
                 Text(exerciseSubtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if isUsingCarriedOverHistory {
+                    Text("Starting from your earlier \(baseName.lowercased()) numbers. That history stays where it is.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             Spacer()
             if isComplete, !showingDetails {
@@ -71,6 +95,9 @@ struct ExerciseLogCard: View {
                         withAnimation(.snappy) { showingHistory.toggle() }
                     }
                 }
+                // Lives in the menu he already opens to reorder or remove, so no
+                // extra control appears on a card until he wants one.
+                brandPicker
                 Button("Move up", systemImage: "arrow.up", action: onMoveUp)
                     .disabled(!canMoveUp)
                 Button("Move down", systemImage: "arrow.down", action: onMoveDown)
@@ -153,6 +180,53 @@ struct ExerciseLogCard: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(exercise.name) logged, \(completedSummary). Reopen to edit.")
+    }
+
+    /// The chosen maker, shown only once there is one, and itself the control
+    /// for changing it. Tapping the thing you want to change beats hunting for
+    /// it in a menu mid-set.
+    @ViewBuilder
+    private var brandChip: some View {
+        if let brand {
+            Menu {
+                brandPicker
+            } label: {
+                HStack(spacing: 4) {
+                    Text(brand.title)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .bold))
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(TodayPalette.accent)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(TodayPalette.accent.opacity(0.1), in: Capsule())
+            }
+            .accessibilityLabel("Machine brand, \(brand.title)")
+            .accessibilityHint("Changes which maker's version of this machine you are logging")
+        }
+    }
+
+    /// Rendered as an inline checkmark list inside whichever menu holds it.
+    /// Empty for barbells, dumbbells and bodyweight, so those never grow a brand
+    /// step at all.
+    @ViewBuilder
+    private var brandPicker: some View {
+        if !brandOptions.isEmpty {
+            Picker("Machine brand", selection: brandSelection) {
+                Text("No brand").tag(EquipmentBrand?.none)
+                ForEach(brandOptions) { option in
+                    Text(option.title).tag(EquipmentBrand?.some(option))
+                }
+            }
+        }
+    }
+
+    private var brandSelection: Binding<EquipmentBrand?> {
+        Binding(
+            get: { brand },
+            set: { onSelectBrand($0) }
+        )
     }
 
     private func setNumber(for set: LoggedSet) -> Int {
