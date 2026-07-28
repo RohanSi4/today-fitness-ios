@@ -28,8 +28,12 @@ private struct TodayWidgetProvider: TimelineProvider {
     private func nextRefresh(after date: Date) -> Date {
         let calendar = Calendar.current
         let start = calendar.startOfDay(for: date)
-        let morning = calendar.date(byAdding: .minute, value: 8 * 60 + 30, to: start) ?? date
-        let noon = calendar.date(byAdding: .hour, value: 12, to: start) ?? date
+        // These are wall-clock times, so they have to be *set*, not added.
+        // Adding 510 minutes to midnight preserves elapsed duration rather than
+        // clock position, so on the spring-forward day the 08:30 refresh landed
+        // at 09:30 and noon landed at 13:00.
+        let morning = calendar.date(bySettingHour: 8, minute: 30, second: 0, of: date) ?? date
+        let noon = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: date) ?? date
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: start) ?? date.addingTimeInterval(86_400)
         if date < morning { return morning }
         if date < noon { return noon }

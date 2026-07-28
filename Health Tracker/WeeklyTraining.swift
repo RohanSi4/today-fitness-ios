@@ -280,7 +280,13 @@ enum TodayWidgetPublisher {
                 plannedMiles: week.prescribedMiles,
                 completedRuns: week.completedRuns,
                 completedLifts: week.completedLifts
-            )
+            ),
+            // Stamped from the week the totals were actually built from, which is
+            // the coach plan's Monday-to-Sunday week when a plan is loaded. The
+            // widget cannot derive this itself, and guessing it from the locale
+            // calendar made Sunday and the next Monday look like one week.
+            weekStartKey: TodayWidgetSnapshot.dayKey(for: week.startDate, calendar: calendar),
+            weekEndKey: TodayWidgetSnapshot.dayKey(for: week.endDate, calendar: calendar)
         )
     }
 
