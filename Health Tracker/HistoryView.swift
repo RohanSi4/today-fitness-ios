@@ -4,6 +4,7 @@ struct HistoryView: View {
     @EnvironmentObject private var appState: AppState
     @ObservedObject var store: TodayStore
     @ObservedObject var catalog: ExerciseCatalog
+    @State private var pendingWorkoutDeletion: WorkoutSession?
 
     private var isEmpty: Bool {
         store.workouts.isEmpty && store.weights.isEmpty && store.dataRecoveryMessage == nil
@@ -19,16 +20,38 @@ struct HistoryView: View {
                 } description: {
                     Text("Finished workouts and morning weights collect here.")
                 } actions: {
+                    Button("Start a workout") {
+                        appState.openWorkout()
+                    }
+                    .buttonStyle(.borderedProminent)
                     Button("Log your first weight") {
                         appState.presentedSheet = .weight
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.bordered)
                 }
             } else {
                 list
             }
         }
         .navigationTitle("History")
+        .confirmationDialog(
+            deletionTitle,
+            isPresented: deletionConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete workout", role: .destructive) {
+                guard let id = pendingWorkoutDeletion?.id else { return }
+                store.deleteWorkout(id: id)
+                pendingWorkoutDeletion = nil
+            }
+            Button("Keep workout", role: .cancel) {
+                pendingWorkoutDeletion = nil
+            }
+        } message: {
+            if let session = pendingWorkoutDeletion {
+                Text("This removes \(session.completedSetCount) working sets and changes progression history.")
+            }
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
@@ -55,10 +78,9 @@ struct HistoryView: View {
                         }
                     }
                     .onDelete { offsets in
-                        let ids = offsets.compactMap { index in
-                            store.workouts.indices.contains(index) ? store.workouts[index].id : nil
-                        }
-                        ids.forEach { store.deleteWorkout(id: $0) }
+                        guard let index = offsets.first,
+                              store.workouts.indices.contains(index) else { return }
+                        pendingWorkoutDeletion = store.workouts[index]
                     }
                 }
             }
@@ -101,6 +123,19 @@ struct HistoryView: View {
                 }
             }
         }
+    }
+
+    private var deletionConfirmation: Binding<Bool> {
+        Binding(
+            get: { pendingWorkoutDeletion != nil },
+            set: { if !$0 { pendingWorkoutDeletion = nil } }
+        )
+    }
+
+    private var deletionTitle: String {
+        guard let session = pendingWorkoutDeletion else { return "Delete workout?" }
+        let date = session.startedAt.formatted(.dateTime.month().day())
+        return "Delete \(session.kind.workoutTitle) from \(date)?"
     }
 }
 
