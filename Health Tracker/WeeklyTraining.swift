@@ -40,6 +40,12 @@ final class RunningWorkoutService: ObservableObject {
     func start() async {
         if ProcessInfo.processInfo.arguments.contains("-useMockData") { return }
         guard healthStore.isHealthDataAvailable else { return }
+
+        // Authorization first. Background delivery cannot be enabled before the
+        // Health prompt is answered, so registering the observer first meant a fresh
+        // install silently never got watch runs delivered in the background.
+        try? await healthStore.requestWorkoutAuthorization()
+
         if !isMonitoring {
             isMonitoring = true
             healthStore.startWorkoutMonitoring { [weak self] in
@@ -48,8 +54,6 @@ final class RunningWorkoutService: ObservableObject {
                 }
             }
         }
-
-        try? await healthStore.requestWorkoutAuthorization()
         await refresh()
     }
 
@@ -212,6 +216,33 @@ enum TodayWidgetPublisher {
         now: Date = .now,
         calendar: Calendar = .current
     ) {
+        guard let snapshot = makeSnapshot(
+            store: store,
+            plan: plan,
+            runs: runs,
+            now: now,
+            calendar: calendar
+        ) else { return }
+
+        guard let defaults = UserDefaults(suiteName: TodayWidgetSnapshot.appGroupIdentifier),
+              let data = try? JSONEncoder().encode(snapshot) else { return }
+        defaults.set(data, forKey: TodayWidgetSnapshot.defaultsKey)
+        WidgetCenter.shared.reloadTimelines(ofKind: TodayWidgetSnapshot.widgetKind)
+    }
+
+    /// Nil when the store could not read its file. A background launch on a locked
+    /// phone - a watch run syncing at 6am - brings the store up empty under
+    /// `.completeFileProtection`. Publishing that told the Lock Screen to "Log
+    /// morning weight" for a day already logged and zeroed the week's mileage.
+    /// Keeping yesterday's payload is strictly better than publishing a lie.
+    static func makeSnapshot(
+        store: TodayStore,
+        plan: TrainingPlan?,
+        runs: [RunningWorkoutSummary],
+        now: Date = .now,
+        calendar: Calendar = .current
+    ) -> TodayWidgetSnapshot? {
+        guard store.hasReliableData else { return nil }
         let week = WeeklyTrainingBuilder.build(
             plan: plan,
             runs: runs,
@@ -219,19 +250,13 @@ enum TodayWidgetPublisher {
             now: now,
             calendar: calendar
         )
-        let today = week.day(for: now, calendar: calendar)
-        let snapshot = makeSnapshot(
+        return makeSnapshot(
             weightLogged: store.weights.contains { calendar.isDate($0.date, inSameDayAs: now) },
-            day: today,
+            day: week.day(for: now, calendar: calendar),
             week: week,
             now: now,
             calendar: calendar
         )
-
-        guard let defaults = UserDefaults(suiteName: TodayWidgetSnapshot.appGroupIdentifier),
-              let data = try? JSONEncoder().encode(snapshot) else { return }
-        defaults.set(data, forKey: TodayWidgetSnapshot.defaultsKey)
-        WidgetCenter.shared.reloadTimelines(ofKind: TodayWidgetSnapshot.widgetKind)
     }
 
     static func makeSnapshot(
