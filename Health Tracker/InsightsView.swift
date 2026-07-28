@@ -16,12 +16,11 @@ struct InsightsView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
-                weightProgress
                 weeklyTraining
-                coachConnection
-                quickAccess
-                recentMuscleWork
+                trainingPulse
                 strengthProgress
+                hypertrophyPlan
+                weightProgress
 
                 Button {
                     showingRecap = true
@@ -32,7 +31,7 @@ struct InsightsView: View {
                             .foregroundStyle(.indigo)
                         VStack(alignment: .leading, spacing: 3) {
                             Text("Sleep and movement recap").font(.headline)
-                            Text("The original Health Recap is still here.")
+                            Text("Sleep duration, consistency, and daily movement.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -44,6 +43,9 @@ struct InsightsView: View {
                 .buttonStyle(.plain)
                 .todayCard()
                 .accessibilityIdentifier("sleep-movement-recap-button")
+
+                coachConnection
+                quickAccess
             }
             .padding(16)
             .padding(.bottom, 28)
@@ -201,6 +203,32 @@ struct InsightsView: View {
         .todayCard()
     }
 
+    private var hypertrophyPlan: some View {
+        NavigationLink {
+            HypertrophyPlanView(store: store, catalog: catalog)
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: "scope")
+                    .font(.title2)
+                    .foregroundStyle(TodayPalette.muscle)
+                    .frame(width: 40, height: 40)
+                    .background(TodayPalette.muscle.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Hypertrophy plan").font(.headline)
+                    Text("Low-fatigue Upper / Lower with movement-specific 4–12 rep targets")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+            }
+            .padding(16)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .todayCard()
+    }
+
     private var coachSyncSummary: String {
         switch coachSync.state {
         case .notConnected: "Connect Today to the private fitness coach"
@@ -231,24 +259,20 @@ struct InsightsView: View {
         .buttonStyle(.plain)
     }
 
-    private var recentMuscleWork: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Last 7 days").font(.headline)
-                Spacer()
-                Text("Muscles trained").font(.caption).foregroundStyle(.secondary)
-            }
-            MuscleMapView(scores: recentScores, compact: true)
-        }
-        .padding(18)
-        .frame(maxWidth: .infinity)
-        .todayCard()
+    private var trainingPulse: some View {
+        TrainingPulseCard(
+            snapshot: TrainingPulseSnapshot.build(
+                workouts: store.workouts,
+                catalog: catalog
+            ),
+            muscleScores: recentScores
+        )
     }
 
     @ViewBuilder
     private var strengthProgress: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Strength progress").font(.headline)
+            Text("Exercise progression").font(.headline)
             let records = exerciseRecords
             if records.isEmpty {
                 Text("Your best sets and estimated strength will appear after the first workout.")
