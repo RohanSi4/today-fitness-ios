@@ -39,7 +39,20 @@ protocol BodyWeightHealthStoring {
     func fetchBodyWeights(start: Date, end: Date) async throws -> [WeightEntry]
 }
 
-final class HealthKitManager: HealthDataProviding, BodyWeightHealthStoring, RunningWorkoutProviding {
+/// `@unchecked` rather than plain `Sendable`, because the safety here is real but
+/// not expressible to the compiler:
+///
+/// - every one of the four mutable properties below is read and written only
+///   inside `withMonitorLock`, which is what makes the unchecked claim true
+///   rather than a silencer;
+/// - `store` is an `HKHealthStore`, which Apple documents as safe to use from
+///   any thread but has not annotated `Sendable`;
+/// - `sessionAssembler` is a struct holding one `TimeInterval`, so it is
+///   implicitly `Sendable` already.
+///
+/// If a mutable property is ever added here, it belongs behind `monitorLock`
+/// too, or this annotation becomes a lie.
+final class HealthKitManager: HealthDataProviding, BodyWeightHealthStoring, RunningWorkoutProviding, @unchecked Sendable {
     static let shared = HealthKitManager()
 
     var isHealthDataAvailable: Bool {
@@ -246,10 +259,6 @@ final class HealthKitManager: HealthDataProviding, BodyWeightHealthStoring, Runn
 
     func startSleepWakeMonitoring(onWake: @escaping @Sendable (Date) -> Void) {
         guard let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) else { return }
-        guard withMonitorLock({ sleepObserverQuery == nil }) else {
-            enableBackgroundDelivery(for: sleepType, isSleep: true)
-            return
-        }
 
         let query = HKObserverQuery(sampleType: sleepType, predicate: nil) { [weak self] _, completion, error in
             guard error == nil, let self else {
@@ -271,23 +280,45 @@ final class HealthKitManager: HealthDataProviding, BodyWeightHealthStoring, Runn
                 onWake(latest.end)
             }
         }
-        withMonitorLock { sleepObserverQuery = query }
+        // Test and set under one acquisition. Checking the slot in one lock and
+        // filling it in another let two concurrent callers both pass the check
+        // and both `execute` a query: one observer leaks, and every wake fires
+        // its callback twice. Building the query first is free, since an
+        // `HKObserverQuery` does nothing until it is executed.
+        guard claimObserverSlot(isSleep: true, query: query) else {
+            enableBackgroundDelivery(for: sleepType, isSleep: true)
+            return
+        }
         store.execute(query)
         enableBackgroundDelivery(for: sleepType, isSleep: true)
     }
 
+    /// Claims the single observer slot for this type, returning false if another
+    /// caller already holds it.
+    private func claimObserverSlot(isSleep: Bool, query: HKObserverQuery) -> Bool {
+        withMonitorLock {
+            if isSleep {
+                guard sleepObserverQuery == nil else { return false }
+                sleepObserverQuery = query
+            } else {
+                guard workoutObserverQuery == nil else { return false }
+                workoutObserverQuery = query
+            }
+            return true
+        }
+    }
+
     func startWorkoutMonitoring(onChange: @escaping @Sendable () -> Void) {
         let workoutType = HKWorkoutType.workoutType()
-        guard withMonitorLock({ workoutObserverQuery == nil }) else {
-            enableBackgroundDelivery(for: workoutType, isSleep: false)
-            return
-        }
         let query = HKObserverQuery(sampleType: workoutType, predicate: nil) { _, completion, error in
             defer { completion() }
             guard error == nil else { return }
             onChange()
         }
-        withMonitorLock { workoutObserverQuery = query }
+        guard claimObserverSlot(isSleep: false, query: query) else {
+            enableBackgroundDelivery(for: workoutType, isSleep: false)
+            return
+        }
         store.execute(query)
         enableBackgroundDelivery(for: workoutType, isSleep: false)
     }

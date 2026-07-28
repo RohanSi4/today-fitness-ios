@@ -16,10 +16,19 @@ protocol WeightReminderScheduling {
     func cancelWeightReminders(for date: Date)
 }
 
-final class NotificationManager: NSObject, RecapNotificationScheduling, WeightReminderScheduling, UNUserNotificationCenterDelegate {
+/// `@unchecked` is forced by the `NSObject` base, which is not itself `Sendable`,
+/// so the compiler will not synthesise the conformance however safe the members
+/// are. The claim still holds: `appState` is the only mutable state and it is
+/// pinned to the main actor below, and everything else here is a `let`.
+final class NotificationManager: NSObject, RecapNotificationScheduling, WeightReminderScheduling, UNUserNotificationCenterDelegate, @unchecked Sendable {
     static let shared = NotificationManager()
 
-    weak var appState: AppState?
+    /// Main-actor isolated rather than free-floating. It was already only ever
+    /// touched from the main actor - written once from `App.init`, read inside
+    /// the `Task { @MainActor }` hops in the delegate callbacks below - but
+    /// nothing said so, which is what made this class unsendable. `AppState`
+    /// drives SwiftUI, so the main actor is where it belongs anyway.
+    @MainActor weak var appState: AppState?
 
     private let recapNotificationID = "dailyRecap"
     private let recapDateKey = "recapDate"
