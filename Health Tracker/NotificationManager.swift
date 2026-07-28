@@ -122,9 +122,6 @@ final class NotificationManager: NSObject, RecapNotificationScheduling, WeightRe
             .removePendingNotificationRequests(withIdentifiers: Self.weightReminderIDs(for: date))
     }
 
-    /// Every reminder that nags about logging a weight for this day. The wake nudge
-    /// used to be left out, so after logging on the scale the phone still buzzed
-    /// "log your morning weight" a few minutes later.
     /// iOS keeps 64 pending local notifications and silently drops the rest.
     static let systemPendingNotificationLimit = 64
     static let remindersPerDay = 2
@@ -133,6 +130,9 @@ final class NotificationManager: NSObject, RecapNotificationScheduling, WeightRe
         max(1, min(requested, maximumReminderDays))
     }
 
+    /// Every reminder that nags about logging a weight for this day. The wake nudge
+    /// used to be left out, so after logging on the scale the phone still buzzed
+    /// "log your morning weight" a few minutes later.
     static func weightReminderIDs(for date: Date) -> [String] {
         let dayKey = Self.dayKey(for: date)
         return ["morning", "lunch", "wake"].map { "\(Self.weightReminderPrefix).\($0).\(dayKey)" }
