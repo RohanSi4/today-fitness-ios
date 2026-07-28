@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// One exercise inside an in-progress workout: its sets, its history, and the
-/// controls for reordering or dropping it.
+/// controls for editing or dropping it.
 struct ExerciseLogCard: View {
     let exercise: ExerciseDefinition
     /// The movement's name without any maker on it. The brand is shown as its
@@ -15,10 +15,6 @@ struct ExerciseLogCard: View {
     /// Set when this row's starting weights were borrowed from the movement's
     /// unbranded history because this maker has none yet.
     let isUsingCarriedOverHistory: Bool
-    let canMoveUp: Bool
-    let canMoveDown: Bool
-    let onMoveUp: () -> Void
-    let onMoveDown: () -> Void
     let onRemove: () -> Void
     let onFinished: () -> Void
     let onSelectBrand: (EquipmentBrand?) -> Void
@@ -27,6 +23,9 @@ struct ExerciseLogCard: View {
     @State private var showingDetails = true
 
     private var brand: EquipmentBrand? { loggedExercise.brand }
+    private var prescription: HypertrophyPrescription {
+        HypertrophyProgramming.prescription(for: loggedExercise.baseExerciseID)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -73,6 +72,10 @@ struct ExerciseLogCard: View {
                 Text(exerciseSubtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Text("\(prescription.reps.label) · \(prescription.effortLabel) · \(prescription.restLabel)")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(TodayPalette.accent)
+                    .fixedSize(horizontal: false, vertical: true)
                 if isUsingCarriedOverHistory {
                     Text("Starting from your earlier \(baseName.lowercased()) numbers. That history stays where it is.")
                         .font(.caption2)
@@ -81,28 +84,19 @@ struct ExerciseLogCard: View {
                 }
             }
             Spacer()
-            if isComplete, !showingDetails {
-                Button("Edit") {
-                    withAnimation(.snappy) { showingDetails = true }
-                }
-                .font(.caption.weight(.semibold))
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
+            Image(systemName: "line.3.horizontal")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(.tertiary)
+                .frame(width: 24, height: 44)
+                .accessibilityLabel("Reorder \(baseName)")
+                .accessibilityHint("Touch and hold, then drag")
             Menu {
                 if !history.isEmpty {
                     Button("Last three sessions", systemImage: "clock.arrow.circlepath") {
                         withAnimation(.snappy) { showingHistory.toggle() }
                     }
                 }
-                // Lives in the menu he already opens to reorder or remove, so no
-                // extra control appears on a card until he wants one.
                 brandPicker
-                Button("Move up", systemImage: "arrow.up", action: onMoveUp)
-                    .disabled(!canMoveUp)
-                Button("Move down", systemImage: "arrow.down", action: onMoveDown)
-                    .disabled(!canMoveDown)
-                Divider()
                 Button("Remove exercise", systemImage: "trash", role: .destructive, action: onRemove)
             } label: {
                 Image(systemName: "ellipsis.circle")
@@ -131,33 +125,48 @@ struct ExerciseLogCard: View {
     }
 
     private var setCountControls: some View {
-        HStack {
-            Button {
-                withAnimation(.snappy) { loggedExercise.removeOneSet() }
-            } label: {
-                Label("Remove set", systemImage: "minus")
-            }
-            .disabled(loggedExercise.sets.count <= 1)
-            .accessibilityLabel("Remove one set from \(exercise.name)")
-
-            Spacer()
-
-            Text(loggedExercise.sets.count == 1 ? "1 set" : "\(loggedExercise.sets.count) sets")
+        VStack(alignment: .leading, spacing: 10) {
+            Text(progressionSuggestion)
+                .font(.caption)
                 .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
+                .fixedSize(horizontal: false, vertical: true)
 
-            Spacer()
+            HStack {
+                Button {
+                    withAnimation(.snappy) { loggedExercise.removeOneSet() }
+                } label: {
+                    Label("Remove set", systemImage: "minus")
+                }
+                .disabled(loggedExercise.sets.count <= 1)
+                .accessibilityLabel("Remove one set from \(exercise.name)")
 
-            Button {
-                withAnimation(.snappy) { loggedExercise.addSet() }
-            } label: {
-                Label("Add set", systemImage: "plus")
+                Spacer()
+
+                Text(loggedExercise.sets.count == 1 ? "1 set" : "\(loggedExercise.sets.count) sets")
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+
+                Spacer()
+
+                Button {
+                    withAnimation(.snappy) { loggedExercise.addSet() }
+                } label: {
+                    Label("Add set", systemImage: "plus")
+                }
+                .accessibilityLabel("Add one set to \(exercise.name)")
             }
-            .accessibilityLabel("Add one set to \(exercise.name)")
+            .buttonStyle(.plain)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(TodayPalette.accent)
         }
-        .buttonStyle(.plain)
-        .font(.subheadline.weight(.semibold))
-        .foregroundStyle(TodayPalette.accent)
+    }
+
+    private var progressionSuggestion: String {
+        HypertrophyProgramming.progressionSuggestion(
+            history: history.first,
+            prescription: prescription,
+            weightIncrement: exercise.weightIncrement
+        )
     }
 
     /// The collapsed state used to be dead text: the only way back was the small
@@ -326,7 +335,7 @@ struct SetLogRow: View {
             )
         }
         .padding(10)
-        // Six controls on one line cannot also honour the accessibility text
+        // The compact steppers cannot also honour the largest accessibility text
         // sizes; past this point the row wraps into unusable overlap. Everything
         // outside the set row still scales the whole way.
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
@@ -348,6 +357,7 @@ struct SetLogRow: View {
     private var repLabel: String {
         exercise.name.localizedCaseInsensitiveContains("single-arm") ? "each" : "reps"
     }
+
 }
 
 struct PreviousPerformanceView: View {

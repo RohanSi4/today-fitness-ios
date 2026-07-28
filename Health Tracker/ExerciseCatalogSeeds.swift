@@ -66,7 +66,7 @@ extension ExerciseCatalog {
     /// Only the equipment class is new.
     static let originalCuratedSeeds: [ExerciseDefinition] = [
         seed(
-            "machine-chest-fly", "Machine chest fly", ["pec deck", "machine fly"], "machine", .selectorized, .total,
+            "machine-chest-fly", "Pec deck", ["machine chest fly", "machine fly"], "machine", .selectorized, .total,
             [.middleChest: 1, .upperChest: 0.55, .lowerChest: 0.45, .frontDelts: 0.3]
         ),
         seed(
@@ -336,6 +336,10 @@ extension ExerciseCatalog {
             [.rhomboids: 1, .middleTraps: 0.9, .lats: 0.7, .rearDelts: 0.6, .bicepsLongHead: 0.45, .bicepsShortHead: 0.4]
         ),
         seed(
+            "chest-supported-t-bar-row", "Chest-supported T-bar row", ["chest supported t bar", "supported t bar row"], "plate-loaded machine", .plateLoaded, .total,
+            [.rhomboids: 1, .middleTraps: 0.95, .lats: 0.75, .rearDelts: 0.6, .bicepsLongHead: 0.45, .bicepsShortHead: 0.4]
+        ),
+        seed(
             "chest-supported-dumbbell-row", "Chest-supported dumbbell row", ["incline bench row", "prone dumbbell row"], "dumbbells", .dumbbell, .perHand,
             [.rhomboids: 1, .middleTraps: 0.9, .lats: 0.75, .rearDelts: 0.6, .bicepsLongHead: 0.45]
         ),
@@ -586,6 +590,10 @@ extension ExerciseCatalog {
             [.bicepsShortHead: 1, .bicepsLongHead: 0.85, .brachialis: 0.5, .forearms: 0.3]
         ),
         seed(
+            "alternating-standing-dumbbell-curl", "Alternating standing dumbbell curl", ["alternating curl", "standing alternating curl"], "dumbbells", .dumbbell, .perHand,
+            [.bicepsShortHead: 1, .bicepsLongHead: 0.85, .brachialis: 0.5, .forearms: 0.3]
+        ),
+        seed(
             "hammer-curl", "Hammer curl", ["neutral grip curl"], "dumbbells", .dumbbell, .perHand,
             [.brachialis: 1, .forearms: 0.7, .bicepsLongHead: 0.65, .bicepsShortHead: 0.45]
         ),
@@ -643,6 +651,10 @@ extension ExerciseCatalog {
         ),
         seed(
             "overhead-rope-triceps-extension", "Overhead rope triceps extension", ["cable overhead extension"], "cable", .cable, .total,
+            [.tricepsLongHead: 1, .tricepsMedialHead: 0.6, .tricepsLateralHead: 0.55]
+        ),
+        seed(
+            "overhead-bar-cable-triceps-extension", "Overhead bar cable triceps extension", ["overhead cable extension ez bar", "overhead cable extension straight bar", "overhead cable triceps extension"], "cable", .cable, .total,
             [.tricepsLongHead: 1, .tricepsMedialHead: 0.6, .tricepsLateralHead: 0.55]
         ),
         seed(

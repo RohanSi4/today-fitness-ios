@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct WorkoutLogView: View {
     @Environment(\.dismiss) private var dismiss
@@ -12,6 +13,9 @@ struct WorkoutLogView: View {
     @State private var showingMuscleMap = false
     @State private var completedSession: WorkoutSession?
     @State private var showDiscardConfirmation = false
+    @State private var showTemplateConfirmation = false
+    @State private var draggedExerciseID: UUID?
+    @State private var dropTargetExerciseID: UUID?
 
     private static let finishButtonID = "finish-workout"
 
@@ -63,6 +67,10 @@ struct WorkoutLogView: View {
                     VStack(spacing: 16) {
                         watchReminder
                         liveMuscleMap
+
+                        if draft.exercises.isEmpty {
+                            hypertrophyTemplateCard
+                        }
                         exerciseCards(proxy)
 
                         if draft.exercises.isEmpty {
@@ -123,6 +131,18 @@ struct WorkoutLogView: View {
             } message: {
                 Text("Every set logged in this session is deleted. This cannot be undone.")
             }
+            .confirmationDialog(
+                "Use \(hypertrophyTemplate?.title ?? "the hypertrophy routine")?",
+                isPresented: $showTemplateConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Replace exercise list") {
+                    applyHypertrophyTemplate()
+                }
+                Button("Keep current list", role: .cancel) {}
+            } message: {
+                Text("This replaces today’s uncompleted exercise list. Your completed workout history is never changed.")
+            }
             .onChange(of: draft) { _, updated in
                 store.updateActiveWorkout(updated)
             }
@@ -143,10 +163,6 @@ struct WorkoutLogView: View {
                         exerciseID: loggedExercise.exerciseID,
                         history: store
                     ),
-                    canMoveUp: draft.exercises.first?.id != loggedExercise.id,
-                    canMoveDown: draft.exercises.last?.id != loggedExercise.id,
-                    onMoveUp: { moveExercise(loggedExercise.id, by: -1) },
-                    onMoveDown: { moveExercise(loggedExercise.id, by: 1) },
                     onRemove: {
                         withAnimation(.snappy) {
                             draft.exercises.removeAll { $0.id == loggedExercise.id }
@@ -165,6 +181,42 @@ struct WorkoutLogView: View {
                 )
                 .id(loggedExercise.id)
                 .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                .overlay {
+                    if dropTargetExerciseID == loggedExercise.id,
+                       draggedExerciseID != loggedExercise.id {
+                        RoundedRectangle(cornerRadius: 18)
+                            .stroke(TodayPalette.accent, lineWidth: 2)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .contentShape(.dragPreview, RoundedRectangle(cornerRadius: 18))
+                .onDrag {
+                    draggedExerciseID = loggedExercise.id
+                    return NSItemProvider(object: loggedExercise.id.uuidString as NSString)
+                } preview: {
+                    Label(baseName(for: loggedExercise, resolved: exercise), systemImage: "line.3.horizontal")
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(.regularMaterial, in: Capsule())
+                }
+                .onDrop(
+                    of: [UTType.text],
+                    delegate: ExerciseReorderDropDelegate(
+                        targetID: loggedExercise.id,
+                        exercises: $draft.exercises,
+                        draggedID: $draggedExerciseID,
+                        targetedID: $dropTargetExerciseID
+                    )
+                )
+                .accessibilityHint("Touch and hold, then drag to reorder")
+                .accessibilityAction(named: "Move earlier") {
+                    moveExercise(loggedExercise.id, by: -1)
+                }
+                .accessibilityAction(named: "Move later") {
+                    moveExercise(loggedExercise.id, by: 1)
+                }
             }
         }
     }
@@ -273,7 +325,7 @@ struct WorkoutLogView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Start Strength Training on your Watch")
                     .font(.subheadline.weight(.semibold))
-                Text("Today tracks your sets. Your Watch and HealthFit still own the workout.")
+                Text("Use Apple Watch for heart rate and Health workout history.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -285,10 +337,52 @@ struct WorkoutLogView: View {
         .accessibilityElement(children: .combine)
     }
 
+    @ViewBuilder
+    private var hypertrophyTemplateCard: some View {
+        if let template = hypertrophyTemplate {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "scope")
+                        .font(.title2)
+                        .foregroundStyle(TodayPalette.muscle)
+                        .frame(width: 38, height: 38)
+                        .background(TodayPalette.muscle.opacity(0.09), in: RoundedRectangle(cornerRadius: 11))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Hypertrophy prescription · \(template.title)")
+                            .font(.subheadline.weight(.semibold))
+                        Text(template.focus)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                }
+
+                Button("Use \(template.title) routine") {
+                    showTemplateConfirmation = true
+                }
+                .buttonStyle(.bordered)
+                .disabled(draft.completedSetCount > 0)
+
+                if draft.completedSetCount > 0 {
+                    Text("The routine cannot replace a workout after a set has been completed.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .todayCard()
+        }
+    }
+
     private var muscleMapStatus: String {
         let count = store.muscleScores(for: draft, catalog: catalog).filter { $0.value > 0 }.count
         if count == 0 { return "Fills in as you finish sets" }
         return count == 1 ? "1 area hit so far" : "\(count) areas hit so far"
+    }
+
+    private var hypertrophyTemplate: HypertrophyTemplate? {
+        HypertrophyProgramming.nextTemplate(for: kind, workouts: store.workouts)
     }
 
     /// Base ids on purpose. Recent should offer the movement, and the remembered
@@ -322,6 +416,36 @@ struct WorkoutLogView: View {
         draft.exercises.append(
             LoggedExercise(exerciseID: exerciseID, sets: starter.sets)
         )
+    }
+
+    private func applyHypertrophyTemplate() {
+        guard draft.completedSetCount == 0, let template = hypertrophyTemplate else { return }
+        let exercises = template.exercises.compactMap { item -> LoggedExercise? in
+            guard catalog.exercise(id: item.exerciseID) != nil else { return nil }
+            let preferredBrand = brandPreferences.lastBrand(for: item.exerciseID)
+            let exerciseID = catalog.qualifiedID(for: item.exerciseID, brand: preferredBrand)
+            let starter = BrandedStarterRules.starter(
+                for: exerciseID,
+                history: store,
+                catalog: catalog
+            )
+            let seed = starter.sets.isEmpty
+                ? [LoggedSet(weight: nil, reps: HypertrophyProgramming.prescription(for: exerciseID).reps.lower, isComplete: false)]
+                : starter.sets
+            let sets = (0..<item.sets).map { index in
+                let source = seed[min(index, seed.count - 1)]
+                return LoggedSet(
+                    weight: source.weight,
+                    reps: source.reps,
+                    isComplete: false,
+                    rir: 0
+                )
+            }
+            return LoggedExercise(exerciseID: exerciseID, sets: sets)
+        }
+        withAnimation(.snappy) {
+            draft.exercises = exercises
+        }
     }
 
     /// Changing maker part-way through keeps every set already logged.
@@ -382,5 +506,57 @@ struct WorkoutLogView: View {
         guard completedSession == nil, store.activeWorkout != nil else { return }
         store.updateActiveWorkout(draft)
         store.flushPersistence()
+    }
+}
+
+/// Reorders cards as the dragged exercise crosses them, matching the native
+/// list-reordering feel while keeping the workout editor's card layout.
+private struct ExerciseReorderDropDelegate: DropDelegate {
+    let targetID: UUID
+    @Binding var exercises: [LoggedExercise]
+    @Binding var draggedID: UUID?
+    @Binding var targetedID: UUID?
+
+    func validateDrop(info: DropInfo) -> Bool {
+        draggedID != nil
+    }
+
+    func dropEntered(info: DropInfo) {
+        guard let draggedID, draggedID != targetID else { return }
+
+        targetedID = targetID
+        withAnimation(.snappy) {
+            ExerciseOrdering.move(draggedID, over: targetID, in: &exercises)
+        }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func dropExited(info: DropInfo) {
+        if targetedID == targetID {
+            targetedID = nil
+        }
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        draggedID = nil
+        targetedID = nil
+        return true
+    }
+}
+
+enum ExerciseOrdering {
+    /// Moving downward places the dragged card after the card it crossed;
+    /// moving upward places it before. That makes the list track the finger
+    /// instead of requiring the user to reason about insertion indexes.
+    static func move(_ draggedID: UUID, over targetID: UUID, in exercises: inout [LoggedExercise]) {
+        guard draggedID != targetID,
+              let source = exercises.firstIndex(where: { $0.id == draggedID }),
+              let destination = exercises.firstIndex(where: { $0.id == targetID }) else { return }
+
+        let dragged = exercises.remove(at: source)
+        exercises.insert(dragged, at: destination)
     }
 }

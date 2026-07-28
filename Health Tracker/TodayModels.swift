@@ -377,6 +377,10 @@ struct LoggedSet: Codable, Hashable, Identifiable {
     var weight: Double?
     var reps: Int
     var isComplete: Bool
+    /// Repetitions still possible with the same technique and range of motion.
+    /// New sets default to zero because the current logging preference is failure.
+    /// Nil remains unknown for older archives and must not be inferred as failure.
+    var rir: Int? = 0
 
     var isPerformed: Bool {
         isComplete && reps > 0
