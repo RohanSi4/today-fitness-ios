@@ -98,7 +98,10 @@ struct DailyRecapBuilder: Sendable {
     init(
         healthData: HealthDataProviding,
         calendar: Calendar = .current,
-        now: @escaping @Sendable () -> Date = Date.init
+        // `{ Date() }` rather than `Date.init`: a reference to an initializer is
+        // not treated as `@Sendable`, so it warns on conversion. This closure
+        // captures nothing, which the compiler can see.
+        now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.healthData = healthData
         self.calendar = calendar
