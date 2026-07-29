@@ -9,8 +9,13 @@ import XCTest
 
 final class Health_TrackerUITestsLaunchTests: XCTestCase {
 
+    // Was `true`, which ran this test once per UI configuration — including
+    // landscape. Two costs, both paid on CI: it multiplied the slowest test in the
+    // suite, and it left the simulator rotated, which is the poisoning
+    // `Health_TrackerUITests.setUpWithError` exists to undo. The app is portrait
+    // only, so the extra configurations were never exercising a supported state.
     override class var runsForEachTargetApplicationUIConfiguration: Bool {
-        true
+        false
     }
 
     override func setUpWithError() throws {
@@ -20,10 +25,17 @@ final class Health_TrackerUITestsLaunchTests: XCTestCase {
     @MainActor
     func testLaunch() throws {
         let app = XCUIApplication()
+        // Every other UI test launches with mock data; this one did not, and that is
+        // why it failed only on CI. Without it the app asks a clean simulator for
+        // real HealthKit authorization, and the test sat on a permission dialog it
+        // never dismissed — 74 seconds before CI gave up on it.
+        app.launchArguments = ["-useMockData", "true"]
         app.launch()
 
-        // Insert steps here to perform after app launch but before taking a screenshot,
-        // such as logging into a test account or navigating somewhere in the app
+        // A screenshot alone asserted nothing: the app could have launched to a blank
+        // window and this still would have "passed". Now it is a real smoke test of
+        // the launch path.
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 30))
 
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "Launch Screen"

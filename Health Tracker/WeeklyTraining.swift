@@ -99,14 +99,38 @@ struct WeeklyDaySnapshot: Identifiable, Equatable {
     let plannedRunMiles: Double?
     let plannedLift: WorkoutKind?
     let plannedOther: String?
+    /// The coach marked this day as the week's hard session.
+    let isKeyDay: Bool
     let run: RunningWorkoutSummary?
     let lift: WorkoutSession?
     let extraLift: WorkoutSession?
 
+    /// How much of the prescribed distance counts the run as done.
+    ///
+    /// This was a flat 0.90, and the Jul 29 5K time trial is exactly why that was
+    /// wrong. The plan read "6.1 mile run" — 2mi warmup, 5K all-out, 1mi cooldown —
+    /// and the cooldown mile was prescribed as a WALK back to the car. Recorded
+    /// running came to 5.39mi, which is 88.4%, so for the rest of the day after a
+    /// maximal effort the widget kept asking for another run, over 0.7 of a mile the
+    /// plan never intended him to run.
+    ///
+    /// Key days get the looser bar because their total is mostly scaffolding: the
+    /// session is the hard piece in the middle, and how much of the warmup and
+    /// cooldown he jogs rather than walks should not decide whether the day counts.
+    /// Ordinary days stay tighter, because on an easy day the mileage IS the session.
+    ///
+    /// Being generous is the right call here in a way it would not be in the coach's
+    /// adherence scoring. This is a PROMPT, not a scorekeeper — the training log reads
+    /// real distances from the watch independently, so a lenient tick costs nothing,
+    /// while a false "not done" nags someone who already did the work.
+    static let easyDayCompletion = 0.75
+    static let keyDayCompletion = 0.60
+
     var id: String { dateKey }
     var runCompleted: Bool {
         guard let plannedRunMiles else { return false }
-        return (run?.miles ?? 0) >= max(0.5, plannedRunMiles * 0.9)
+        let fraction = isKeyDay ? Self.keyDayCompletion : Self.easyDayCompletion
+        return (run?.miles ?? 0) >= max(0.5, plannedRunMiles * fraction)
     }
     var liftCompleted: Bool { plannedLift != nil && lift != nil }
     var isFullyComplete: Bool {
@@ -189,6 +213,7 @@ enum WeeklyTrainingBuilder {
                 plannedRunMiles: planned?.plannedRunMiles,
                 plannedLift: planned?.workoutKind,
                 plannedOther: planned?.isRestOnly == true ? "Recovery" : nil,
+                isKeyDay: planned?.isKeyDay ?? false,
                 run: combinedRun,
                 lift: matchedLift,
                 extraLift: extraLift

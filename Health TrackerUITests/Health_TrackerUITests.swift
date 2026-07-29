@@ -1,6 +1,23 @@
 import XCTest
 
 final class Health_TrackerUITests: XCTestCase {
+    /// How long to wait for an element that SHOULD appear.
+    ///
+    /// These were 2 and 5 seconds, which is comfortable on an M-series Mac and not
+    /// on a shared CI runner: `testActiveWorkoutCanCloseAndResumeWithoutBeingDiscarded`
+    /// passed locally every time and failed on CI, where a SwiftUI transition can
+    /// easily outlast two seconds. A generous ceiling costs nothing when the app is
+    /// healthy, because `waitForExistence` returns the moment the element shows up —
+    /// it only changes how long a genuine failure takes to report.
+    static let uiTimeout: TimeInterval = 20
+
+    /// How long to wait for an element that may legitimately NOT be there.
+    ///
+    /// Deliberately short, and NOT `uiTimeout`: this one asks "did an earlier test
+    /// leave a workout open?", where "no" is a normal answer. Waiting 20 seconds to
+    /// hear it would add that to every clean run.
+    static let probeTimeout: TimeInterval = 3
+
     @MainActor
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -31,7 +48,7 @@ final class Health_TrackerUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-useMockData", "true"]
         app.launch()
-        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: Self.uiTimeout))
 
         let portrait = app.windows.firstMatch.frame
         XCTAssertGreaterThan(portrait.height, portrait.width, "did not start portrait")
@@ -58,9 +75,9 @@ final class Health_TrackerUITests: XCTestCase {
         app.launchArguments = ["-useMockData", "true"]
         app.launch()
 
-        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Today"].waitForExistence(timeout: Self.uiTimeout))
         app.buttons["log-weight-button"].tap()
-        XCTAssertTrue(app.navigationBars["Morning weight"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Morning weight"].waitForExistence(timeout: Self.uiTimeout))
         XCTAssertTrue(app.buttons["Save weight"].exists)
         XCTAssertTrue(app.buttons["Adjust weight by +0.1 pounds"].exists)
     }
@@ -73,13 +90,13 @@ final class Health_TrackerUITests: XCTestCase {
 
         app.tabBars.buttons["Insights"].tap()
         app.buttons["sleep-movement-recap-button"].tap()
-        XCTAssertTrue(app.staticTexts["Sample data"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Sample data"].waitForExistence(timeout: Self.uiTimeout))
         XCTAssertTrue(app.staticTexts["Sleep details"].exists)
 
         let recap = app.scrollViews["daily-recap-scroll"]
         XCTAssertTrue(recap.exists)
         recap.swipeUp()
-        XCTAssertTrue(app.staticTexts["Movement"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["Movement"].waitForExistence(timeout: Self.uiTimeout))
     }
 
     @MainActor
@@ -89,9 +106,9 @@ final class Health_TrackerUITests: XCTestCase {
         app.launch()
 
         let card = app.buttons["weekly-snapshot-card"]
-        XCTAssertTrue(card.waitForExistence(timeout: 5))
+        XCTAssertTrue(card.waitForExistence(timeout: Self.uiTimeout))
         card.tap()
-        XCTAssertTrue(app.navigationBars["This week"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["This week"].waitForExistence(timeout: Self.uiTimeout))
         XCTAssertTrue(app.descendants(matching: .any)["weekly-snapshot-table"].exists)
     }
 
@@ -102,14 +119,14 @@ final class Health_TrackerUITests: XCTestCase {
         app.launch()
 
         let stretches = app.buttons["stretches-button"]
-        XCTAssertTrue(stretches.waitForExistence(timeout: 5))
+        XCTAssertTrue(stretches.waitForExistence(timeout: Self.uiTimeout))
         stretches.tap()
 
-        XCTAssertTrue(app.navigationBars["Run stretches"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Run stretches"].waitForExistence(timeout: Self.uiTimeout))
         let firstCard = app.buttons
             .matching(NSPredicate(format: "label BEGINSWITH %@", "Butt kickers"))
             .firstMatch
-        XCTAssertTrue(firstCard.waitForExistence(timeout: 2))
+        XCTAssertTrue(firstCard.waitForExistence(timeout: Self.uiTimeout))
         firstCard.tap()
         XCTAssertTrue((firstCard.value as? String)?.contains("Expanded") == true)
 
@@ -117,10 +134,10 @@ final class Health_TrackerUITests: XCTestCase {
         XCTAssertTrue(start.exists)
         start.tap()
 
-        XCTAssertTrue(app.scrollViews["stretch-session-scroll"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.scrollViews["stretch-session-scroll"].waitForExistence(timeout: Self.uiTimeout))
         XCTAssertTrue(app.staticTexts["Butt kickers"].exists)
         app.buttons["complete-stretch-step"].tap()
-        XCTAssertTrue(app.staticTexts["Frankensteins"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["Frankensteins"].waitForExistence(timeout: Self.uiTimeout))
     }
 
     @MainActor
@@ -130,16 +147,16 @@ final class Health_TrackerUITests: XCTestCase {
         app.launch()
 
         let stretches = app.buttons["stretches-button"]
-        XCTAssertTrue(stretches.waitForExistence(timeout: 5))
+        XCTAssertTrue(stretches.waitForExistence(timeout: Self.uiTimeout))
         stretches.tap()
 
         let postRun = app.segmentedControls.buttons["Post-run"]
-        XCTAssertTrue(postRun.waitForExistence(timeout: 2))
+        XCTAssertTrue(postRun.waitForExistence(timeout: Self.uiTimeout))
         postRun.tap()
         app.buttons["start-stretch-routine"].tap()
 
         let timerButton = app.buttons["stretch-timer-button"]
-        XCTAssertTrue(timerButton.waitForExistence(timeout: 2))
+        XCTAssertTrue(timerButton.waitForExistence(timeout: Self.uiTimeout))
         XCTAssertEqual(timerButton.label, "Start 30-second hold")
         XCTAssertTrue(app.staticTexts["Ready when you are"].exists)
 
@@ -147,7 +164,7 @@ final class Health_TrackerUITests: XCTestCase {
         XCTAssertEqual(timerButton.label, "Pause")
 
         app.buttons["stretch-step-picker-button"].tap()
-        XCTAssertTrue(app.navigationBars["Routine wheel"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.navigationBars["Routine wheel"].waitForExistence(timeout: Self.uiTimeout))
         XCTAssertTrue(app.pickers["stretch-step-picker"].exists)
         app.buttons["Cancel"].tap()
         XCTAssertEqual(timerButton.label, "Resume hold")
@@ -165,24 +182,24 @@ final class Health_TrackerUITests: XCTestCase {
         app.launch()
 
         let resume = app.buttons["resume-workout-button"]
-        if resume.waitForExistence(timeout: 2) {
+        if resume.waitForExistence(timeout: Self.probeTimeout) {
             resume.tap()
         } else {
             let start = app.buttons["start-workout-button"]
-            XCTAssertTrue(start.waitForExistence(timeout: 5))
+            XCTAssertTrue(start.waitForExistence(timeout: Self.uiTimeout))
             start.tap()
             let upper = app.buttons["start-upper-workout"]
-            XCTAssertTrue(upper.waitForExistence(timeout: 2))
+            XCTAssertTrue(upper.waitForExistence(timeout: Self.uiTimeout))
             upper.tap()
         }
 
         let close = app.buttons["close-workout-button"]
-        XCTAssertTrue(close.waitForExistence(timeout: 2))
+        XCTAssertTrue(close.waitForExistence(timeout: Self.uiTimeout))
         XCTAssertTrue(app.buttons["workout-options-menu"].exists)
         close.tap()
 
-        XCTAssertTrue(resume.waitForExistence(timeout: 2))
+        XCTAssertTrue(resume.waitForExistence(timeout: Self.uiTimeout))
         resume.tap()
-        XCTAssertTrue(app.buttons["close-workout-button"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["close-workout-button"].waitForExistence(timeout: Self.uiTimeout))
     }
 }

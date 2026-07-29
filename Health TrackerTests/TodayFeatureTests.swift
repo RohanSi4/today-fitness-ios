@@ -497,6 +497,92 @@ struct WeeklyTrainingSnapshotTests {
         #expect(!json.contains("pounds"))
     }
 
+    @Test func theTimeTrialDayCountsAsDoneOnceTheHardEffortIsRun() throws {
+        // The real Jul 29 2026 case. The plan read "6.1 mile run" — 2mi warmup, a 5K
+        // all-out, and a cooldown mile the plan itself said to WALK back to the car.
+        // Three separate watch recordings came to 5.39mi, or 88.4% of 6.1, and the old
+        // flat 90% bar meant the widget spent the rest of the day asking for another
+        // run after a maximal effort.
+        let calendar = utcCalendar
+        let now = try #require(date("2026-07-22T18:00:00Z"))
+        let plan = keyDayPlan(todayText: "6.1 mile run")
+        let start = try #require(date("2026-07-22T15:00:00Z"))
+        let warmup = RunningWorkoutSummary(
+            id: UUID(), startedAt: start, endedAt: start.addingTimeInterval(1_270),
+            miles: 2.01, duration: 1_270
+        )
+        let timeTrial = RunningWorkoutSummary(
+            id: UUID(),
+            startedAt: start.addingTimeInterval(1_500),
+            endedAt: start.addingTimeInterval(2_764),
+            miles: 3.11, duration: 1_264
+        )
+        let jogBack = RunningWorkoutSummary(
+            id: UUID(),
+            startedAt: start.addingTimeInterval(3_000),
+            endedAt: start.addingTimeInterval(3_135),
+            miles: 0.27, duration: 135
+        )
+
+        let snapshot = WeeklyTrainingBuilder.build(
+            plan: plan, runs: [warmup, timeTrial, jogBack], lifts: [],
+            now: now, calendar: calendar
+        )
+        let today = try #require(snapshot.day(for: now, calendar: calendar))
+
+        #expect(today.isKeyDay)
+        // Summed Doubles: 2.01 + 3.11 + 0.27 is 5.389999999999999, not 5.39.
+        #expect(abs((today.run?.miles ?? 0) - 5.39) < 0.001)
+        #expect(today.runCompleted)
+        #expect(today.isFullyComplete)
+    }
+
+    @Test func anEasyDayStillHasToBeMostlyRun() throws {
+        // The looser bar is for key days, whose total is padded with warmup and
+        // cooldown. On an easy day the mileage IS the session, so half of it is not
+        // the day done — otherwise the tick stops meaning anything.
+        let calendar = utcCalendar
+        let now = try #require(date("2026-07-22T18:00:00Z"))
+        let plan = samplePlan(todayText: "6 mile run")
+        let start = try #require(date("2026-07-22T15:00:00Z"))
+        let short = RunningWorkoutSummary(
+            id: UUID(), startedAt: start, endedAt: start.addingTimeInterval(1_800),
+            miles: 3.0, duration: 1_800
+        )
+        let most = RunningWorkoutSummary(
+            id: UUID(), startedAt: start, endedAt: start.addingTimeInterval(2_700),
+            miles: 4.7, duration: 2_700
+        )
+
+        let bailed = WeeklyTrainingBuilder.build(
+            plan: plan, runs: [short], lifts: [], now: now, calendar: calendar
+        )
+        #expect(try !#require(bailed.day(for: now, calendar: calendar)).runCompleted)
+
+        let closeEnough = WeeklyTrainingBuilder.build(
+            plan: plan, runs: [most], lifts: [], now: now, calendar: calendar
+        )
+        #expect(try #require(closeEnough.day(for: now, calendar: calendar)).runCompleted)
+    }
+
+    private func keyDayPlan(todayText: String) -> TrainingPlan {
+        let plan = samplePlan(todayText: todayText)
+        return TrainingPlan(
+            weekStart: plan.weekStart,
+            weekEnd: plan.weekEnd,
+            prescribedMiles: plan.prescribedMiles,
+            days: plan.days.map { day in
+                TrainingPlanDay(
+                    date: day.date,
+                    dayLabel: day.dayLabel,
+                    text: day.text,
+                    isKeyDay: day.date == "2026-07-22",
+                    details: day.details
+                )
+            }
+        )
+    }
+
     private func samplePlan(todayText: String) -> TrainingPlan {
         TrainingPlan(
             weekStart: "2026-07-20",
