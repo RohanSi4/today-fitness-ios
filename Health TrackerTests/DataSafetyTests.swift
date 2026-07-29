@@ -376,6 +376,26 @@ struct CoachSyncReliabilityTests {
         #expect(CoachSyncService.message(forStatus: 500).localizedCaseInsensitiveContains("retry"))
     }
 
+    @Test func aKeychainRefusalIsNotReportedAsABadPairingCode() throws {
+        // The regression that cost a week: the keychain wrapper threw
+        // .invalidPairingCode when the STORE failed, so an unsigned CI build made a
+        // perfectly good code look malformed and pointed the diagnosis at the guards.
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [SyncStubProtocol.self]
+        let service = CoachSyncService(
+            session: URLSession(configuration: configuration),
+            defaults: try #require(UserDefaults(suiteName: "coach-sync-tests-\(UUID().uuidString)")),
+            keychain: RefusingSecretStore(),
+            retryDelays: []
+        )
+
+        #expect(throws: CoachSyncError.secretStoreUnavailable(errSecMissingEntitlement)) {
+            try service.connect(pairingCode: Self.pairingCode)
+        }
+        // And the connection must not be left half-made when the secret never landed.
+        #expect(!service.isConnected)
+    }
+
     @Test func dayKeysFollowTheDeviceTimeZoneRatherThanTheLaunchTimeZone() {
         let evening = Date(timeIntervalSince1970: 1_753_146_000) // 2025-07-22 01:00 UTC
         var utc = Calendar(identifier: .gregorian)
@@ -393,7 +413,7 @@ struct CoachSyncReliabilityTests {
         let service = CoachSyncService(
             session: URLSession(configuration: configuration),
             defaults: try #require(UserDefaults(suiteName: "coach-sync-tests-\(UUID().uuidString)")),
-            keychain: CoachSyncKeychain(service: "com.rohansingh.today.coach-sync.tests"),
+            keychain: InMemorySecretStore(),
             retryDelays: retryDelays
         )
         try service.connect(pairingCode: Self.pairingCode)
@@ -515,6 +535,34 @@ final class SyncStubProtocol: URLProtocol {
     private static func batchID(from body: Data) -> String? {
         (try? JSONSerialization.jsonObject(with: body) as? [String: Any])??["batchId"] as? String
     }
+}
+
+/// Keeps the pairing secret in memory instead of the system keychain.
+///
+/// These four tests failed only on CI for a week. CI builds with
+/// `CODE_SIGNING_ALLOWED=NO`, so the simulator app carries no
+/// `application-identifier` entitlement and `SecItemAdd` returns
+/// errSecMissingEntitlement (-34018). Locally the app is signed, the keychain works,
+/// and everything passed — which is exactly why inspecting the guard conditions in
+/// `connect(pairingCode:)` never found anything: the pairing code was always valid.
+///
+/// A unit test for sync bookkeeping has no business depending on whether the host
+/// process holds a keychain entitlement, so it no longer does.
+final class InMemorySecretStore: CoachSyncSecretStore {
+    private var storage: [String: Data] = [:]
+
+    func save(_ data: Data, account: String) throws { storage[account] = data }
+    func load(_ account: String) -> Data? { storage[account] }
+    func delete(_ account: String) { storage[account] = nil }
+}
+
+/// Reproduces exactly what an unsigned build gets back from the keychain.
+final class RefusingSecretStore: CoachSyncSecretStore {
+    func save(_ data: Data, account: String) throws {
+        throw CoachSyncError.secretStoreUnavailable(errSecMissingEntitlement)
+    }
+    func load(_ account: String) -> Data? { nil }
+    func delete(_ account: String) {}
 }
 
 nonisolated(unsafe) let syncStub = SyncStubState()

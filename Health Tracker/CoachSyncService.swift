@@ -105,7 +105,7 @@ final class CoachSyncService: ObservableObject, CoachSyncing {
 
     private let session: URLSession
     private let defaults: UserDefaults
-    private let keychain: CoachSyncKeychain
+    private let keychain: CoachSyncSecretStore
     private let retryDelays: [Duration]
     private var pairing: CoachSyncPairing?
     private var debounceTask: Task<Void, Never>?
@@ -126,7 +126,7 @@ final class CoachSyncService: ObservableObject, CoachSyncing {
     init(
         session: URLSession = .shared,
         defaults: UserDefaults = .standard,
-        keychain: CoachSyncKeychain = CoachSyncKeychain(),
+        keychain: CoachSyncSecretStore = CoachSyncKeychain(),
         retryDelays: [Duration] = [.seconds(2), .seconds(8)]
     ) {
         self.session = session
@@ -548,21 +548,37 @@ final class CoachSyncService: ObservableObject, CoachSyncing {
     }
 }
 
-enum CoachSyncError: LocalizedError {
+enum CoachSyncError: LocalizedError, Equatable {
     case invalidPairingCode
+    /// The keychain refused to hold the pairing secret. This is deliberately NOT
+    /// `invalidPairingCode`: it was, and a perfectly valid code then reported itself
+    /// as invalid, which sent the diagnosis at the guard conditions for a week while
+    /// the real cause was the environment. Carries the OSStatus so the next failure
+    /// names itself (-34018 = errSecMissingEntitlement, what an unsigned build gets).
+    case secretStoreUnavailable(OSStatus)
     case serverRejected
     case snapshotTooLarge
 
     var errorDescription: String? {
         switch self {
         case .invalidPairingCode: "That connection code is not valid."
+        case .secretStoreUnavailable: "This phone would not store the connection securely. Try again after unlocking it."
         case .serverRejected: "The coach sync server rejected the update."
         case .snapshotTooLarge: "The private fitness snapshot is too large to sync."
         }
     }
 }
 
-final class CoachSyncKeychain {
+/// Where the pairing secret lives. A protocol so tests can supply a store that does
+/// not depend on the process holding a keychain entitlement — see the note on
+/// `CoachSyncError.secretStoreUnavailable`.
+protocol CoachSyncSecretStore: AnyObject {
+    func save(_ data: Data, account: String) throws
+    func load(_ account: String) -> Data?
+    func delete(_ account: String)
+}
+
+final class CoachSyncKeychain: CoachSyncSecretStore {
     private let service: String
 
     /// The service name is injectable purely so tests never touch, overwrite, or
@@ -584,11 +600,12 @@ final class CoachSyncKeychain {
         let updateStatus = SecItemUpdate(query as CFDictionary, values as CFDictionary)
         if updateStatus == errSecSuccess { return }
         guard updateStatus == errSecItemNotFound else {
-            throw CoachSyncError.invalidPairingCode
+            throw CoachSyncError.secretStoreUnavailable(updateStatus)
         }
         let addQuery = query.merging(values) { _, new in new }
-        guard SecItemAdd(addQuery as CFDictionary, nil) == errSecSuccess else {
-            throw CoachSyncError.invalidPairingCode
+        let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+        guard addStatus == errSecSuccess else {
+            throw CoachSyncError.secretStoreUnavailable(addStatus)
         }
     }
 
