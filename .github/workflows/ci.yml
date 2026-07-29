@@ -42,7 +42,7 @@ jobs:
         run: |
           set -euo pipefail
           udid=$(xcrun simctl list devices available --json | python3 -c '
-          import json, sys
+          import json, re, sys
           data = json.load(sys.stdin)["devices"]
           best = None
           for runtime, devices in data.items():
@@ -56,9 +56,22 @@ jobs:
               for device in devices:
                   if not device.get("isAvailable"):
                       continue
-                  if "iPhone" not in device.get("name", ""):
+                  name = device.get("name", "")
+                  if "iPhone" not in name:
                       continue
-                  key = (version, device["name"])
+                  # Rank by model NUMBER, not by name. Sorting on the name
+                  # picked "iPhone SE (3rd generation)" over "iPhone 17 Pro",
+                  # because "S" > "1" lexicographically, so CI silently ran on
+                  # the slowest device in the lineup instead of the newest.
+                  model = re.search(r"iPhone (\d+)", name)
+                  rank = int(model.group(1)) if model else -1
+                  # Then by trim, or the name tiebreak picks "iPhone 17e" over
+                  # "iPhone 17 Pro" ("e" > " ").
+                  if "Pro Max" in name: trim = 3
+                  elif "Pro" in name: trim = 2
+                  elif "Plus" in name: trim = 1
+                  else: trim = 0
+                  key = (version, rank, trim, name)
                   if best is None or key > best[0]:
                       best = (key, device)
           if best is None:
@@ -90,7 +103,12 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
 
-      # Runs both bundles: 206 swift-testing unit tests and 11 XCUITest cases.
+      # Runs both bundles: 206 swift-testing unit tests and 11 XCUITest cases,
+      # minus ScreenshotWalkthrough. That bundle is a screenshot harness, not an
+      # assertion suite: its own header says it is kept out of the normal run.
+      # It also depends on locally seeded state (tools/seed-active-workout.sh),
+      # so on a clean runner it asserts against whatever the mock data happens
+      # to hold, and it is slow enough to push this job past 27 minutes.
       # HealthKit is unavailable in Simulator, so the app takes its mock and
       # simulator-only paths here. Real Health reads and body-mass writes still
       # need a physical iPhone.
@@ -102,6 +120,7 @@ jobs:
             -scheme "$APP_SCHEME" \
             -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
             -resultBundlePath TestResults.xcresult \
+            -skip-testing:"Health TrackerUITests/ScreenshotWalkthrough" \
             CODE_SIGNING_ALLOWED=NO \
             test
 
