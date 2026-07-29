@@ -79,7 +79,11 @@ struct SleepSessionAssemblerTests {
 
 struct RecapMathTests {
     @Test func circularAverageHandlesMidnight() throws {
-        let average = try #require(CircularClock.averageMinutes([23 * 60 + 50, 10]))
+        // 23:50 and 00:10. The Double() is load-bearing: inside an array
+        // literal the element type has to be inferred, and Xcode 26.3 types
+        // `23 * 60 + 50` as Int and then refuses to convert it. 26.6 resolves
+        // it, so this compiled locally and failed only on CI.
+        let average = try #require(CircularClock.averageMinutes([Double(23 * 60 + 50), 10]))
         #expect(average < 1 || average > 1_439)
     }
 

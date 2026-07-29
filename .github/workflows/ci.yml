@@ -90,7 +90,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
 
-      # Runs both bundles: 52 swift-testing unit tests and 7 XCUITest cases.
+      # Runs both bundles: 206 swift-testing unit tests and 11 XCUITest cases.
       # HealthKit is unavailable in Simulator, so the app takes its mock and
       # simulator-only paths here. Real Health reads and body-mass writes still
       # need a physical iPhone.
