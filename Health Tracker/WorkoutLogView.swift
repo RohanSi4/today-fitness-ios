@@ -10,10 +10,10 @@ struct WorkoutLogView: View {
     let kind: WorkoutKind
     @State private var draft: WorkoutSession
     @State private var showingExercisePicker = false
-    @State private var showingMuscleMap = false
     @State private var completedSession: WorkoutSession?
     @State private var showDiscardConfirmation = false
     @State private var showTemplateConfirmation = false
+    @State private var showFinishConfirmation = false
     @State private var draggedExerciseID: UUID?
     @State private var dropTargetExerciseID: UUID?
 
@@ -50,7 +50,17 @@ struct WorkoutLogView: View {
     var body: some View {
         Group {
             if let completedSession {
-                WorkoutSummaryView(session: completedSession, store: store, catalog: catalog)
+                WorkoutSummaryView(
+                    session: completedSession,
+                    store: store,
+                    catalog: catalog,
+                    onReopen: {
+                        if let active = store.activeWorkout {
+                            draft = active
+                            self.completedSession = nil
+                        }
+                    }
+                )
             } else {
                 workoutEditor
             }
@@ -73,7 +83,13 @@ struct WorkoutLogView: View {
                         if draft.completedSetCount == 0 {
                             watchReminder
                         }
-                        liveMuscleMap
+                        if let lastCompletedAt = draft.lastCompletedSetAt {
+                            RestElapsedCard(startedAt: lastCompletedAt)
+                        }
+                        WorkoutCoverageCard(
+                            targets: coverageTargets,
+                            directSetCounts: coverageSetCounts
+                        )
 
                         if draft.exercises.isEmpty {
                             hypertrophyTemplateCard
@@ -94,7 +110,7 @@ struct WorkoutLogView: View {
                         .controlSize(.large)
 
                         Button {
-                            finishWorkout()
+                            requestFinishWorkout()
                         } label: {
                             Text("Finish workout").frame(maxWidth: .infinity)
                         }
@@ -110,7 +126,7 @@ struct WorkoutLogView: View {
                 .background(Color(.systemGroupedBackground))
                 .scrollDismissesKeyboard(.interactively)
             }
-            .navigationTitle(kind.workoutTitle)
+            .navigationTitle(draft.workoutTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
             .sheet(isPresented: $showingExercisePicker) {
@@ -149,6 +165,16 @@ struct WorkoutLogView: View {
                 Button("Keep current list", role: .cancel) {}
             } message: {
                 Text("This replaces today’s uncompleted exercise list. Your completed workout history is never changed.")
+            }
+            .confirmationDialog(
+                "Finish with \(incompleteWorkingSetCount) sets incomplete?",
+                isPresented: $showFinishConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Finish workout") { finishWorkout() }
+                Button("Keep logging", role: .cancel) {}
+            } message: {
+                Text("Completed sets are saved. Unchecked planned sets remain available when editing History but do not count toward progression or muscle coverage.")
             }
             .onChange(of: draft) { _, updated in
                 store.updateActiveWorkout(updated)
@@ -279,50 +305,6 @@ struct WorkoutLogView: View {
         }
     }
 
-    private var liveMuscleMap: some View {
-        VStack(spacing: 0) {
-            Button {
-                withAnimation(.snappy) { showingMuscleMap.toggle() }
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "figure.strengthtraining.traditional")
-                        .font(.title3)
-                        .foregroundStyle(TodayPalette.muscle)
-                        .frame(width: 38, height: 38)
-                        .background(TodayPalette.muscle.opacity(0.09), in: RoundedRectangle(cornerRadius: 11))
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Muscle map")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.primary)
-                        Text(muscleMapStatus)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.down")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.tertiary)
-                        .rotationEffect(.degrees(showingMuscleMap ? 180 : 0))
-                }
-                .padding(14)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Muscle map, \(muscleMapStatus)")
-            .accessibilityHint(showingMuscleMap ? "Collapses the muscle map" : "Expands the muscle map")
-
-            if showingMuscleMap {
-                Divider().padding(.horizontal, 14)
-                MuscleMapView(scores: store.muscleScores(for: draft, catalog: catalog), compact: true)
-                    .padding(14)
-                    .frame(maxWidth: .infinity)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-        }
-        .todayCard()
-    }
-
     private var watchReminder: some View {
         HStack(spacing: 12) {
             Image(systemName: "applewatch")
@@ -382,14 +364,24 @@ struct WorkoutLogView: View {
         }
     }
 
-    private var muscleMapStatus: String {
-        let count = store.muscleScores(for: draft, catalog: catalog).filter { $0.value > 0 }.count
-        if count == 0 { return "Fills in as you finish sets" }
-        return count == 1 ? "1 area hit so far" : "\(count) areas hit so far"
+    private var coverageTargets: [WorkoutMuscleArea] {
+        WorkoutMuscleCoverage.targets(for: draft, catalog: catalog)
+    }
+
+    private var completedCoverage: Set<WorkoutMuscleArea> {
+        WorkoutMuscleCoverage.completed(in: draft, catalog: catalog)
+    }
+
+    private var coverageSetCounts: [WorkoutMuscleArea: Int] {
+        WorkoutMuscleCoverage.directSetCounts(in: draft, catalog: catalog)
+    }
+
+    private var remainingCoverage: [WorkoutMuscleArea] {
+        coverageTargets.filter { !completedCoverage.contains($0) }
     }
 
     private var hypertrophyTemplate: HypertrophyTemplate? {
-        HypertrophyProgramming.nextTemplate(for: kind, workouts: store.workouts)
+        draft.routineTemplate ?? store.nextRoutine(for: kind)
     }
 
     /// Base ids on purpose. Recent should offer the movement, and the remembered
@@ -451,6 +443,8 @@ struct WorkoutLogView: View {
             return LoggedExercise(exerciseID: exerciseID, sets: sets)
         }
         withAnimation(.snappy) {
+            draft.routineID = template.id
+            draft.routineSnapshot = template
             draft.exercises = exercises
         }
     }
@@ -493,6 +487,20 @@ struct WorkoutLogView: View {
         }
     }
 
+    private func requestFinishWorkout() {
+        if incompleteWorkingSetCount > 0 {
+            showFinishConfirmation = true
+        } else {
+            finishWorkout()
+        }
+    }
+
+    private var incompleteWorkingSetCount: Int {
+        draft.exercises.flatMap(\.sets).filter {
+            $0.setType.countsAsWorking && !$0.isPerformed
+        }.count
+    }
+
     private func moveExercise(_ id: UUID, by offset: Int) {
         guard let source = draft.exercises.firstIndex(where: { $0.id == id }) else { return }
         let destination = source + offset
@@ -513,6 +521,59 @@ struct WorkoutLogView: View {
         guard completedSession == nil, store.activeWorkout != nil else { return }
         store.updateActiveWorkout(draft)
         store.flushPersistence()
+    }
+}
+
+private struct RestElapsedCard: View {
+    let startedAt: Date
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            HStack(spacing: 12) {
+                Image(systemName: "timer")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(TodayPalette.accent)
+                    .frame(width: 36, height: 36)
+                    .background(TodayPalette.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 11))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("TIME SINCE LAST SET")
+                        .font(.caption2.weight(.bold))
+                        .tracking(0.7)
+                        .foregroundStyle(.secondary)
+                    Text(elapsed(at: context.date))
+                        .font(.title3.monospacedDigit().weight(.bold))
+                        .contentTransition(.numericText())
+                }
+                Spacer(minLength: 0)
+                Text("Counts up")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Time since last set, \(accessibleElapsed(at: context.date))")
+            .accessibilityIdentifier("rest-elapsed-timer")
+        }
+    }
+
+    private func elapsed(at date: Date) -> String {
+        let seconds = max(0, Int(date.timeIntervalSince(startedAt)))
+        let hours = seconds / 3_600
+        let minutes = (seconds % 3_600) / 60
+        let remainder = seconds % 60
+        return hours > 0
+            ? String(format: "%d:%02d:%02d", hours, minutes, remainder)
+            : String(format: "%d:%02d", minutes, remainder)
+    }
+
+    private func accessibleElapsed(at date: Date) -> String {
+        let seconds = max(0, Int(date.timeIntervalSince(startedAt)))
+        let minutes = seconds / 60
+        let remainder = seconds % 60
+        return "\(minutes) minutes, \(remainder) seconds"
     }
 }
 

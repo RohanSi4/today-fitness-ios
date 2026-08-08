@@ -53,6 +53,9 @@ enum WeightSaveService {
         reminders: WeightReminderScheduling,
         calendar: Calendar = .current
     ) async -> WeightSaveOutcome {
+        let replacedEntry = store.weights.first {
+            calendar.isDate($0.date, inSameDayAs: date)
+        }
         // The reading lands on disk before anything that can throw. Everything
         // after this point is best effort and cannot cost him the number.
         store.recordWeight(pounds, on: date)
@@ -71,7 +74,8 @@ enum WeightSaveService {
             pounds: pounds,
             on: date,
             store: store,
-            healthStore: healthStore
+            healthStore: healthStore,
+            replacedEntry: replacedEntry
         )
 
         // Always runs now. He logged his weight, so the nagging stops whether or
@@ -85,7 +89,8 @@ enum WeightSaveService {
         pounds: Double,
         on date: Date,
         store: TodayStore,
-        healthStore: BodyWeightHealthStoring
+        healthStore: BodyWeightHealthStoring,
+        replacedEntry: WeightEntry?
     ) async -> HealthWriteResult {
         guard healthStore.isHealthDataAvailable else { return .unavailable }
 
@@ -96,7 +101,19 @@ enum WeightSaveService {
             // Re-recording the same day attaches the sample id. `recordWeight`
             // is keyed by day and clears that day before appending, so this
             // replaces the local-only entry rather than adding a second row.
-            store.recordWeight(pounds, on: date, healthKitID: sampleID)
+            store.recordWeight(
+                pounds,
+                on: date,
+                healthKitID: sampleID,
+                healthKitOwnedByToday: true
+            )
+
+            if replacedEntry?.healthKitOwnedByToday == true,
+               let previousID = replacedEntry?.healthKitID,
+               previousID != sampleID,
+               let deletingStore = healthStore as? BodyWeightHealthDeleting {
+                try? await deletingStore.deleteBodyWeight(id: previousID)
+            }
 
             let start = Calendar.current.date(byAdding: .year, value: -2, to: Date()) ?? date
             if let history = try? await healthStore.fetchBodyWeights(

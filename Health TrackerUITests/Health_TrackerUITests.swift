@@ -188,7 +188,7 @@ final class Health_TrackerUITests: XCTestCase {
             let start = app.buttons["start-workout-button"]
             XCTAssertTrue(start.waitForExistence(timeout: Self.uiTimeout))
             start.tap()
-            let upper = app.buttons["start-upper-workout"]
+            let upper = app.buttons["start-upper-a-workout"]
             XCTAssertTrue(upper.waitForExistence(timeout: Self.uiTimeout))
             upper.tap()
         }

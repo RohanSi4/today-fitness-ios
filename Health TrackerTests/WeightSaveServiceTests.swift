@@ -185,6 +185,32 @@ struct WeightSaveServiceTests {
         #expect(store.weights.contains { $0.pounds == 185.0 })
     }
 
+    @Test func correctingATodayOwnedWeightRemovesTheOldHealthSample() async {
+        let store = TodayStore(storageURL: temporaryURL("replace-owned"), calendar: utcCalendar)
+        let oldID = UUID()
+        let newID = UUID()
+        store.recordWeight(
+            184.4,
+            on: day,
+            healthKitID: oldID,
+            healthKitOwnedByToday: true
+        )
+        let health = StubHealthStore(sampleID: newID)
+
+        _ = await WeightSaveService.save(
+            pounds: 183.9,
+            on: day,
+            store: store,
+            healthStore: health,
+            reminders: StubReminders(),
+            calendar: utcCalendar
+        )
+
+        #expect(health.deletedIDs == [oldID])
+        #expect(store.weights.first?.healthKitID == newID)
+        #expect(store.weights.first?.healthKitOwnedByToday == true)
+    }
+
     private var day: Date { Date(timeIntervalSince1970: 1_753_075_200) }
 
     private func temporaryURL(_ name: String) -> URL {
@@ -206,7 +232,7 @@ private enum HealthStubError: LocalizedError {
 }
 
 @MainActor
-private final class StubHealthStore: BodyWeightHealthStoring {
+private final class StubHealthStore: BodyWeightHealthStoring, BodyWeightHealthDeleting {
     let isHealthDataAvailable: Bool
     private let authorizationError: Error?
     private let saveError: Error?
@@ -215,6 +241,7 @@ private final class StubHealthStore: BodyWeightHealthStoring {
 
     private(set) var authorizationRequests = 0
     private(set) var savedPounds: [Double] = []
+    private(set) var deletedIDs: [UUID] = []
 
     init(
         isHealthDataAvailable: Bool = true,
@@ -243,6 +270,10 @@ private final class StubHealthStore: BodyWeightHealthStoring {
 
     func fetchBodyWeights(start: Date, end: Date) async throws -> [WeightEntry] {
         history
+    }
+
+    func deleteBodyWeight(id: UUID) async throws {
+        deletedIDs.append(id)
     }
 }
 

@@ -372,6 +372,34 @@ extension ExerciseDefinition {
     }
 }
 
+enum WorkoutSetType: String, Codable, CaseIterable, Identifiable {
+    case working
+    case warmup
+    case backoff
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .working: "Working"
+        case .warmup: "Warm-up"
+        case .backoff: "Backoff"
+        }
+    }
+
+    var shortTitle: String {
+        switch self {
+        case .working: "Work"
+        case .warmup: "Warm-up"
+        case .backoff: "Backoff"
+        }
+    }
+
+    /// Warm-ups prepare the movement but should not inflate hypertrophy dose,
+    /// progression targets, or fatigue estimates. Backoff sets still count.
+    var countsAsWorking: Bool { self != .warmup }
+}
+
 struct LoggedSet: Codable, Hashable, Identifiable {
     var id = UUID()
     var weight: Double?
@@ -381,9 +409,56 @@ struct LoggedSet: Codable, Hashable, Identifiable {
     /// New sets default to zero because the current logging preference is failure.
     /// Nil remains unknown for older archives and must not be inferred as failure.
     var rir: Int? = 0
+    /// The instant the set was checked off. This drives an elapsed rest clock,
+    /// not a countdown, and remains nil for legacy completed sets.
+    var completedAt: Date? = nil
+    var setType: WorkoutSetType = .working
 
     var isPerformed: Bool {
         isComplete && reps > 0
+    }
+
+    var isWorkingSet: Bool {
+        isPerformed && setType.countsAsWorking
+    }
+
+    /// Only the primary working load drives rep-then-load progression. Backoff
+    /// work still contributes to hypertrophy dose and muscle coverage.
+    var isProgressionSet: Bool {
+        isPerformed && setType == .working
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, weight, reps, isComplete, rir, completedAt, setType
+    }
+
+    init(
+        id: UUID = UUID(),
+        weight: Double?,
+        reps: Int,
+        isComplete: Bool,
+        rir: Int? = 0,
+        completedAt: Date? = nil,
+        setType: WorkoutSetType = .working
+    ) {
+        self.id = id
+        self.weight = weight
+        self.reps = reps
+        self.isComplete = isComplete
+        self.rir = rir
+        self.completedAt = completedAt
+        self.setType = setType
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        weight = try container.decodeIfPresent(Double.self, forKey: .weight)
+        reps = try container.decode(Int.self, forKey: .reps)
+        isComplete = try container.decode(Bool.self, forKey: .isComplete)
+        rir = try container.decodeIfPresent(Int.self, forKey: .rir)
+        completedAt = try container.decodeIfPresent(Date.self, forKey: .completedAt)
+        setType = try container.decodeIfPresent(WorkoutSetType.self, forKey: .setType) ?? .working
     }
 }
 
@@ -416,12 +491,26 @@ struct LoggedExercise: Codable, Hashable, Identifiable {
 struct WorkoutSession: Codable, Hashable, Identifiable {
     var id = UUID()
     let kind: WorkoutKind
+    /// Identifies the exact routine selected without changing the long-lived
+    /// `WorkoutKind` values that are shared with history and coach sync.
+    var routineID: String? = nil
+    /// Freezes the routine as it existed when the workout began. Editing Upper A
+    /// next month must not rename or reinterpret the workout done today.
+    var routineSnapshot: HypertrophyTemplate? = nil
     let startedAt: Date
     var endedAt: Date?
     var exercises: [LoggedExercise]
 
     var completedSetCount: Int {
+        exercises.flatMap(\.sets).filter(\.isWorkingSet).count
+    }
+
+    var performedSetCount: Int {
         exercises.flatMap(\.sets).filter(\.isPerformed).count
+    }
+
+    var lastCompletedSetAt: Date? {
+        exercises.flatMap(\.sets).compactMap(\.completedAt).max()
     }
 }
 
@@ -430,6 +519,12 @@ struct WeightEntry: Codable, Hashable, Identifiable {
     let date: Date
     let pounds: Double
     let healthKitID: UUID?
+    /// True only for a sample written by Today. Imported scale/manual samples
+    /// must never be deleted when a local correction replaces the day.
+    var healthKitOwnedByToday: Bool? = nil
+    /// User-entered corrections win over later HealthKit refreshes for the same
+    /// calendar day. External samples cannot be deleted by this app.
+    var isUserEntered: Bool? = nil
 }
 
 struct StoredTodayData: Codable {
@@ -439,6 +534,10 @@ struct StoredTodayData: Codable {
     var workouts: [WorkoutSession] = []
     var activeWorkout: WorkoutSession?
     var goalWeight: Double = StoredTodayData.defaultGoalWeight
+    var routines: [HypertrophyTemplate] = HypertrophyProgramming.templates
+    /// IDs intentionally removed by the user. The remote archive needs these to
+    /// distinguish a deletion from a workout omitted by a rolling export window.
+    var deletedWorkoutIDs: [UUID] = []
 
     /// Entries that were in the file but could not be decoded, so this value is a
     /// partial view of what is on disk. Never encoded. `TodayStore` uses it to keep
@@ -451,18 +550,24 @@ struct StoredTodayData: Codable {
         case workouts
         case activeWorkout
         case goalWeight
+        case routines
+        case deletedWorkoutIDs
     }
 
     init(
         weights: [WeightEntry] = [],
         workouts: [WorkoutSession] = [],
         activeWorkout: WorkoutSession? = nil,
-        goalWeight: Double = StoredTodayData.defaultGoalWeight
+        goalWeight: Double = StoredTodayData.defaultGoalWeight,
+        routines: [HypertrophyTemplate] = HypertrophyProgramming.templates,
+        deletedWorkoutIDs: [UUID] = []
     ) {
         self.weights = weights
         self.workouts = workouts
         self.activeWorkout = activeWorkout
         self.goalWeight = goalWeight
+        self.routines = routines
+        self.deletedWorkoutIDs = deletedWorkoutIDs
     }
 
     // Decoding is deliberately element-by-element. The synthesised array decode is
@@ -487,6 +592,9 @@ struct StoredTodayData: Codable {
             if decoded == nil { dropped += 1 }
             goalWeight = decoded ?? Self.defaultGoalWeight
         }
+        routines = (try? container.decode([HypertrophyTemplate].self, forKey: .routines))
+            .map(Self.validatedRoutines) ?? HypertrophyProgramming.templates
+        deletedWorkoutIDs = (try? container.decode([UUID].self, forKey: .deletedWorkoutIDs)) ?? []
         unreadableEntryCount = dropped
     }
 
@@ -496,6 +604,14 @@ struct StoredTodayData: Codable {
         try container.encode(workouts, forKey: .workouts)
         try container.encodeIfPresent(activeWorkout, forKey: .activeWorkout)
         try container.encode(goalWeight, forKey: .goalWeight)
+        try container.encode(routines, forKey: .routines)
+        try container.encode(deletedWorkoutIDs, forKey: .deletedWorkoutIDs)
+    }
+
+    private static func validatedRoutines(_ decoded: [HypertrophyTemplate]) -> [HypertrophyTemplate] {
+        let supported = Set(HypertrophyProgramming.templates.map(\.id))
+        let unique = Dictionary(decoded.filter { supported.contains($0.id) }.map { ($0.id, $0) }) { first, _ in first }
+        return HypertrophyProgramming.templates.map { unique[$0.id] ?? $0 }
     }
 
     private static func hasValue(

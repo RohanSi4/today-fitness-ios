@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import Testing
 @testable import Health_Tracker
 
@@ -203,6 +204,23 @@ struct StoreDataSafetyTests {
         #expect(spy.scheduledSnapshots.count == 2)
     }
 
+    @Test func aUserCorrectionWinsOverLaterExternalHealthRefreshes() {
+        let store = TodayStore(storageURL: temporaryURL("manual-weight-priority"), calendar: utcCalendar)
+        let externalID = UUID()
+        store.mergeHealthWeights([
+            WeightEntry(date: referenceDay, pounds: 184.4, healthKitID: externalID),
+        ])
+
+        store.recordWeight(183.8, on: referenceDay.addingTimeInterval(600))
+        store.mergeHealthWeights([
+            WeightEntry(date: referenceDay, pounds: 184.4, healthKitID: externalID),
+        ])
+
+        #expect(store.weights.count == 1)
+        #expect(store.weights[0].pounds == 183.8)
+        #expect(store.weights[0].isUserEntered == true)
+    }
+
     // MARK: - helpers
 
     private var referenceDay: Date { Date(timeIntervalSince1970: 1_753_075_200) }
@@ -332,6 +350,51 @@ struct CoachSyncReliabilityTests {
         #expect(syncStub.requestCount == 1)
         #expect(!service.hasPendingChanges)
         #expect(service.lastSyncedAt != nil)
+    }
+
+    @Test func uploadedPrivateDataAuthenticatesItsEnvelopeAndNeverPublishesWeight() async throws {
+        let service = try makeService()
+        let catalog = ExerciseCatalog(cacheURL: temporaryURL("authenticated-catalog"))
+        syncStub.reset()
+        let snapshot = StoredTodayData(
+            weights: [WeightEntry(date: Date(), pounds: 184.4, healthKitID: nil)],
+            goalWeight: 175
+        )
+
+        await service.sync(snapshot: snapshot, catalog: catalog)
+
+        let body = try #require(syncStub.latestBody)
+        let object = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        #expect(object["schemaVersion"] as? Int == 2)
+        #expect(object["publicWeight"] == nil)
+        let batchID = try #require(object["batchId"] as? String)
+        let deviceID = try #require(object["deviceId"] as? String)
+        let createdAt = try #require(object["createdAt"] as? String)
+        let encryption = try #require(object["encryption"] as? [String: Any])
+        let keyID = try #require(encryption["keyId"] as? String)
+        let nonceString = try #require(encryption["nonce"] as? String)
+        let ciphertextString = try #require(encryption["ciphertext"] as? String)
+        let tagString = try #require(encryption["tag"] as? String)
+        let nonceData = try #require(Data(base64Encoded: nonceString))
+        let ciphertext = try #require(Data(base64Encoded: ciphertextString))
+        let tag = try #require(Data(base64Encoded: tagString))
+        let box = try AES.GCM.SealedBox(
+            nonce: AES.GCM.Nonce(data: nonceData),
+            ciphertext: ciphertext,
+            tag: tag
+        )
+        let plaintext = try AES.GCM.open(
+            box,
+            using: SymmetricKey(data: Data(repeating: 7, count: 32)),
+            authenticating: CoachSyncService.authenticatedMetadata(
+                batchID: batchID,
+                deviceID: deviceID,
+                createdAt: createdAt,
+                keyID: keyID
+            )
+        )
+        let privateObject = try #require(JSONSerialization.jsonObject(with: plaintext) as? [String: Any])
+        #expect(privateObject["schemaVersion"] as? Int == 2)
     }
 
     @Test func aServerErrorIsRetriedAndARejectionIsNot() async throws {
@@ -583,6 +646,12 @@ final class SyncStubState: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return statusCode
+    }
+
+    var latestBody: Data? {
+        lock.lock()
+        defer { lock.unlock() }
+        return bodies.last
     }
 
     func reset() {

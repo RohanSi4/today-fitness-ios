@@ -39,6 +39,10 @@ protocol BodyWeightHealthStoring: Sendable {
     func fetchBodyWeights(start: Date, end: Date) async throws -> [WeightEntry]
 }
 
+protocol BodyWeightHealthDeleting: Sendable {
+    func deleteBodyWeight(id: UUID) async throws
+}
+
 /// `@unchecked` rather than plain `Sendable`, because the safety here is real but
 /// not expressible to the compiler:
 ///
@@ -52,7 +56,7 @@ protocol BodyWeightHealthStoring: Sendable {
 ///
 /// If a mutable property is ever added here, it belongs behind `monitorLock`
 /// too, or this annotation becomes a lie.
-final class HealthKitManager: HealthDataProviding, BodyWeightHealthStoring, RunningWorkoutProviding, @unchecked Sendable {
+final class HealthKitManager: HealthDataProviding, BodyWeightHealthStoring, BodyWeightHealthDeleting, RunningWorkoutProviding, @unchecked Sendable {
     static let shared = HealthKitManager()
 
     var isHealthDataAvailable: Bool {
@@ -181,6 +185,40 @@ final class HealthKitManager: HealthDataProviding, BodyWeightHealthStoring, Runn
             }
         }
         return sample.uuid
+    }
+
+    func deleteBodyWeight(id: UUID) async throws {
+        guard let bodyMass = HKObjectType.quantityType(forIdentifier: .bodyMass) else {
+            throw HealthKitError.unsupportedType
+        }
+        let predicate = HKQuery.predicateForObject(with: id)
+        let samples: [HKQuantitySample] = try await withCheckedThrowingContinuation { continuation in
+            let query = HKSampleQuery(
+                sampleType: bodyMass,
+                predicate: predicate,
+                limit: 1,
+                sortDescriptors: nil
+            ) { _, results, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: (results as? [HKQuantitySample]) ?? [])
+                }
+            }
+            store.execute(query)
+        }
+        guard let sample = samples.first else { return }
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            store.delete(sample) { success, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if success {
+                    continuation.resume(returning: ())
+                } else {
+                    continuation.resume(throwing: HealthKitError.authorizationDenied)
+                }
+            }
+        }
     }
 
     func fetchBodyWeights(start: Date, end: Date) async throws -> [WeightEntry] {

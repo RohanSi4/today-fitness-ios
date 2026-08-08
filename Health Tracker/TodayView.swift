@@ -109,7 +109,7 @@ struct TodayView: View {
 
     private var headerContext: String {
         if let active = store.activeWorkout {
-            return "\(active.kind.title) in progress"
+            return "\(active.routineTemplate?.title ?? active.kind.title) in progress"
         }
         if day?.isRestOnly == true {
             return "Recovery day · keep movement easy"
@@ -334,7 +334,7 @@ struct TodayView: View {
 
             if let active = store.activeWorkout {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("\(active.kind.workoutTitle) in progress")
+                    Text("\(active.workoutTitle) in progress")
                         .font(.title3.weight(.bold))
                     Text("\(active.completedSetCount) sets checked off so far")
                         .font(.subheadline)

@@ -45,19 +45,14 @@ struct CoachSyncView: View {
                     }
 
                     Section {
-                        Toggle(
-                            "Share weight progress",
-                            isOn: Binding(
-                                get: { service.sharesWeightTrend },
-                                set: { updateWeightSharing($0) }
-                            )
-                        )
-                        Label("Strength totals and muscle groups are shared", systemImage: "checkmark.shield")
+                        Label("Only strength totals and muscle groups are public", systemImage: "checkmark.shield")
+                            .font(.subheadline)
+                        Label("Weight, exercises, sets, reps, and load stay encrypted", systemImage: "lock.shield")
                             .font(.subheadline)
                     } header: {
                         Text("Public fitness page")
                     } footer: {
-                        Text("Weight sharing is optional. It sends the current number, 7-day average, 28-day change, goal, and logging consistency. It never sends the daily history.")
+                        Text("Body weight is private coach context and is never included in the public summary.")
                     }
                 } else {
                     Section {
@@ -138,8 +133,4 @@ struct CoachSyncView: View {
         }
     }
 
-    private func updateWeightSharing(_ enabled: Bool) {
-        service.setWeightTrendSharing(enabled)
-        Task { await store.syncWithCoach() }
-    }
 }

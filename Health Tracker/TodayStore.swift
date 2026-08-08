@@ -9,6 +9,7 @@ final class TodayStore: ObservableObject {
     @Published private(set) var workouts: [WorkoutSession] = []
     @Published var activeWorkout: WorkoutSession?
     @Published var goalWeight: Double = 175
+    @Published private(set) var routines: [HypertrophyTemplate] = HypertrophyProgramming.templates
     @Published private(set) var dataRecoveryMessage: String?
 
     /// False only when a load failed because the bytes were unreadable, which gates
@@ -30,6 +31,7 @@ final class TodayStore: ObservableObject {
     private let syncService: any CoachSyncing
     private(set) var permitsExternalCoachSync: Bool
     private var pendingPersistTask: Task<Void, Never>?
+    private var deletedWorkoutIDs: [UUID] = []
 
     /// Read when a template builds its starting exercises, so a workout opens on
     /// the makers he already picked instead of on unbranded rows he has to fix.
@@ -97,13 +99,67 @@ final class TodayStore: ObservableObject {
         }
     }
 
-    func recordWeight(_ pounds: Double, on date: Date = Date(), healthKitID: UUID? = nil) {
+    func recordWeight(
+        _ pounds: Double,
+        on date: Date = Date(),
+        healthKitID: UUID? = nil,
+        healthKitOwnedByToday: Bool = false
+    ) {
         guard pounds.isFinite, pounds > 0, pounds < 1_000 else { return }
         let day = calendar.startOfDay(for: date)
         weights.removeAll { calendar.isDate($0.date, inSameDayAs: day) }
-        weights.append(WeightEntry(date: date, pounds: pounds, healthKitID: healthKitID))
+        weights.append(WeightEntry(
+            date: date,
+            pounds: pounds,
+            healthKitID: healthKitID,
+            healthKitOwnedByToday: healthKitOwnedByToday,
+            isUserEntered: true
+        ))
         weights.sort { $0.date > $1.date }
         persist(syncAfterSave: true)
+    }
+
+    func deleteWeight(id: UUID) {
+        guard weights.contains(where: { $0.id == id }) else { return }
+        weights.removeAll { $0.id == id }
+        persist(syncAfterSave: true)
+    }
+
+    func updateGoalWeight(_ pounds: Double) {
+        guard pounds.isFinite, pounds >= 50, pounds <= 500 else { return }
+        goalWeight = pounds
+        persist(syncAfterSave: true)
+    }
+
+    func updateRoutine(_ routine: HypertrophyTemplate) {
+        guard let index = routines.firstIndex(where: { $0.id == routine.id }),
+              !routine.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !routine.exercises.isEmpty else { return }
+        routines[index] = routine
+        persist(syncAfterSave: true)
+    }
+
+    func resetRoutine(id: String) {
+        guard let original = HypertrophyProgramming.template(id: id),
+              let index = routines.firstIndex(where: { $0.id == id }) else { return }
+        routines[index] = original
+        persist(syncAfterSave: true)
+    }
+
+    func routine(id: String?) -> HypertrophyTemplate? {
+        guard let id else { return nil }
+        return routines.first { $0.id == id }
+    }
+
+    func nextRoutine(for kind: WorkoutKind) -> HypertrophyTemplate? {
+        let ids: (a: String, b: String)
+        switch kind {
+        case .upper: ids = ("upper-a", "upper-b")
+        case .lower: ids = ("lower-a", "lower-b")
+        default: return nil
+        }
+        let last = workouts.first { $0.routineID == ids.a || $0.routineID == ids.b }?.routineID
+        return routine(id: last == ids.a ? ids.b : ids.a)
     }
 
     func mergeHealthWeights(_ entries: [WeightEntry]) {
@@ -115,6 +171,10 @@ final class TodayStore: ObservableObject {
             // replace rewrote identical rows, churned SwiftUI identity, and fired a
             // coach sync on every single weight save. Only take a genuine change.
             let existing = weights.first { calendar.isDate($0.date, inSameDayAs: entry.date) }
+            if existing?.isUserEntered == true,
+               existing?.healthKitID != entry.healthKitID {
+                continue
+            }
             if let existing,
                existing.date == entry.date,
                existing.pounds == entry.pounds,
@@ -141,6 +201,19 @@ final class TodayStore: ObservableObject {
         persist()
     }
 
+    func beginWorkout(template: HypertrophyTemplate, catalog: ExerciseCatalog) {
+        if activeWorkout != nil { return }
+        activeWorkout = WorkoutSession(
+            kind: template.kind,
+            routineID: template.id,
+            routineSnapshot: template,
+            startedAt: Date(),
+            endedAt: nil,
+            exercises: starterExercises(for: template, catalog: catalog)
+        )
+        persist()
+    }
+
     func updateActiveWorkout(_ workout: WorkoutSession) {
         activeWorkout = workout
         schedulePersist()
@@ -161,8 +234,35 @@ final class TodayStore: ObservableObject {
     }
 
     func deleteWorkout(id: UUID) {
+        guard workouts.contains(where: { $0.id == id }) else { return }
         workouts.removeAll { $0.id == id }
+        if !deletedWorkoutIDs.contains(id) {
+            deletedWorkoutIDs.append(id)
+        }
         persist(syncAfterSave: true)
+    }
+
+    func updateWorkout(_ workout: WorkoutSession) {
+        guard let index = workouts.firstIndex(where: { $0.id == workout.id }) else { return }
+        workouts[index] = workout
+        workouts.sort { $0.startedAt > $1.startedAt }
+        persist(syncAfterSave: true)
+    }
+
+    @discardableResult
+    func reopenWorkout(id: UUID) -> Bool {
+        guard activeWorkout == nil,
+              let index = workouts.firstIndex(where: { $0.id == id }) else { return false }
+        var reopened = workouts.remove(at: index)
+        reopened.endedAt = nil
+        activeWorkout = reopened
+        persist(syncAfterSave: true)
+        return true
+    }
+
+    @discardableResult
+    func undoFinishedWorkout(id: UUID) -> Bool {
+        reopenWorkout(id: id)
     }
 
     func flushPersistence() {
@@ -180,7 +280,9 @@ final class TodayStore: ObservableObject {
             weights: weights,
             workouts: workouts,
             activeWorkout: activeWorkout,
-            goalWeight: goalWeight
+            goalWeight: goalWeight,
+            routines: routines,
+            deletedWorkoutIDs: deletedWorkoutIDs
         )
     }
 
@@ -193,7 +295,7 @@ final class TodayStore: ObservableObject {
             .sorted { $0.startedAt > $1.startedAt }
             .compactMap { session in
                 session.exercises.first {
-                    $0.exerciseID == exerciseID && $0.sets.contains(where: \.isPerformed)
+                    $0.exerciseID == exerciseID && $0.sets.contains(where: \.isWorkingSet)
                 }
             }
             .prefix(limit)
@@ -204,7 +306,7 @@ final class TodayStore: ObservableObject {
         var scores: [MuscleGroup: Double] = [:]
         for loggedExercise in workout.exercises {
             guard let exercise = catalog.exercise(id: loggedExercise.exerciseID) else { continue }
-            let completedSets = Double(loggedExercise.sets.filter(\.isPerformed).count)
+            let completedSets = Double(loggedExercise.sets.filter(\.isWorkingSet).count)
             guard completedSets > 0 else { continue }
             for contribution in exercise.muscles {
                 scores[contribution.muscle, default: 0] += completedSets * contribution.intensity
@@ -215,7 +317,7 @@ final class TodayStore: ObservableObject {
 
     func starterSets(for exerciseID: String, catalog: ExerciseCatalog) -> [LoggedSet] {
         let previousSets = lastPerformance(for: exerciseID, limit: 1)
-            .first?.sets.filter(\.isPerformed) ?? []
+            .first?.sets.filter(\.isProgressionSet) ?? []
         let fallback = catalog.defaultSets(for: exerciseID)
         let first = previousSets.first ?? fallback.first ?? LoggedSet(weight: nil, reps: 8, isComplete: false)
         let second = previousSets.dropFirst().first ?? fallback.dropFirst().first ?? first
@@ -246,6 +348,33 @@ final class TodayStore: ObservableObject {
                     catalog: catalog
                 ).sets
             )
+        }
+    }
+
+    private func starterExercises(
+        for template: HypertrophyTemplate,
+        catalog: ExerciseCatalog
+    ) -> [LoggedExercise] {
+        template.exercises.compactMap { item in
+            guard catalog.exercise(id: item.exerciseID) != nil else { return nil }
+            let exerciseID = brandedID(for: item.exerciseID, catalog: catalog)
+            let starter = BrandedStarterRules.starter(
+                for: exerciseID,
+                history: self,
+                catalog: catalog
+            ).sets
+            let seed = starter.isEmpty
+                ? [LoggedSet(
+                    weight: nil,
+                    reps: HypertrophyProgramming.prescription(for: exerciseID).reps.lower,
+                    isComplete: false
+                )]
+                : starter
+            let sets = (0..<item.sets).map { index in
+                let source = seed[min(index, seed.count - 1)]
+                return LoggedSet(weight: source.weight, reps: source.reps, isComplete: false, rir: 0)
+            }
+            return LoggedExercise(exerciseID: exerciseID, sets: sets)
         }
     }
 
@@ -360,8 +489,13 @@ final class TodayStore: ObservableObject {
 
     private func apply(_ stored: StoredTodayData) {
         weights = stored.weights.sorted { $0.date > $1.date }
-        workouts = stored.workouts.sorted { $0.startedAt > $1.startedAt }
+        let deleted = Set(stored.deletedWorkoutIDs)
+        workouts = stored.workouts
+            .filter { !deleted.contains($0.id) }
+            .sorted { $0.startedAt > $1.startedAt }
         activeWorkout = stored.activeWorkout
+        routines = stored.routines
+        deletedWorkoutIDs = stored.deletedWorkoutIDs
         goalWeight = stored.goalWeight.isFinite && stored.goalWeight > 0
             ? stored.goalWeight
             : StoredTodayData.defaultGoalWeight
@@ -378,6 +512,10 @@ final class TodayStore: ObservableObject {
 
         let known = Set(workouts.map(\.id))
         workouts.append(contentsOf: pending.workouts.filter { !known.contains($0.id) })
+        deletedWorkoutIDs = Array(Set(deletedWorkoutIDs + pending.deletedWorkoutIDs))
+            .sorted { $0.uuidString < $1.uuidString }
+        let deleted = Set(deletedWorkoutIDs)
+        workouts.removeAll { deleted.contains($0.id) }
         workouts.sort { $0.startedAt > $1.startedAt }
 
         if let active = pending.activeWorkout { activeWorkout = active }
@@ -385,6 +523,9 @@ final class TodayStore: ObservableObject {
         // so only a deliberate-looking value overrides what was on disk.
         if pending.goalWeight != StoredTodayData.defaultGoalWeight {
             goalWeight = pending.goalWeight
+        }
+        if pending.routines != HypertrophyProgramming.templates {
+            routines = pending.routines
         }
     }
 

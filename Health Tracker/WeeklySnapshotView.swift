@@ -181,7 +181,7 @@ struct WeeklySnapshotView: View {
 
     private func liftTitle(_ day: WeeklyDaySnapshot) -> String {
         if let kind = day.plannedLift { return kind.title }
-        if let extra = day.extraLift { return extra.kind.title }
+        if let extra = day.extraLift { return extra.routineTemplate?.title ?? extra.kind.title }
         return day.plannedOther ?? "Rest"
     }
 

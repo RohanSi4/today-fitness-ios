@@ -37,6 +37,7 @@ struct ExerciseLogCard: View {
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
+                nextSetTargetCard
                 setRows
                 setCountControls
             } else {
@@ -72,7 +73,7 @@ struct ExerciseLogCard: View {
                 Text(exerciseSubtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text("\(prescription.reps.label) · \(prescription.effortLabel) · \(prescription.restLabel)")
+                Text(prescription.reps.label)
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(TodayPalette.accent)
                     .fixedSize(horizontal: false, vertical: true)
@@ -125,48 +126,78 @@ struct ExerciseLogCard: View {
     }
 
     private var setCountControls: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(progressionSuggestion)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            HStack {
-                Button {
-                    withAnimation(.snappy) { loggedExercise.removeOneSet() }
-                } label: {
-                    Label("Remove set", systemImage: "minus")
-                }
-                .disabled(loggedExercise.sets.count <= 1)
-                .accessibilityLabel("Remove one set from \(exercise.name)")
-
-                Spacer()
-
-                Text(loggedExercise.sets.count == 1 ? "1 set" : "\(loggedExercise.sets.count) sets")
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-
-                Spacer()
-
-                Button {
-                    withAnimation(.snappy) { loggedExercise.addSet() }
-                } label: {
-                    Label("Add set", systemImage: "plus")
-                }
-                .accessibilityLabel("Add one set to \(exercise.name)")
+        HStack {
+            Button {
+                withAnimation(.snappy) { loggedExercise.removeOneSet() }
+            } label: {
+                Label("Remove set", systemImage: "minus")
             }
-            .buttonStyle(.plain)
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(TodayPalette.accent)
+            .disabled(loggedExercise.sets.count <= 1)
+            .accessibilityLabel("Remove one set from \(exercise.name)")
+
+            Spacer()
+
+            Text(loggedExercise.sets.count == 1 ? "1 set" : "\(loggedExercise.sets.count) sets")
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+
+            Spacer()
+
+            Button {
+                withAnimation(.snappy) { loggedExercise.addSet() }
+            } label: {
+                Label("Add set", systemImage: "plus")
+            }
+            .accessibilityLabel("Add one set to \(exercise.name)")
+        }
+        .buttonStyle(.plain)
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(TodayPalette.accent)
+    }
+
+    @ViewBuilder
+    private var nextSetTargetCard: some View {
+        if let target = HypertrophyProgramming.nextSetTarget(
+            current: loggedExercise,
+            history: history,
+            exercise: exercise
+        ) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "scope")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(TodayPalette.accent)
+                    .frame(width: 30, height: 30)
+                    .background(TodayPalette.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 9))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("NEXT SET  ·  \(targetLabel(target))")
+                        .font(.caption.monospacedDigit().weight(.bold))
+                        .foregroundStyle(.primary)
+                    Text(target.note)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(target.confidence.label)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(TodayPalette.accent)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(11)
+            .background(TodayPalette.accent.opacity(0.065), in: RoundedRectangle(cornerRadius: 13))
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("next-set-target-\(exercise.baseID)")
         }
     }
 
-    private var progressionSuggestion: String {
-        HypertrophyProgramming.progressionSuggestion(
-            history: history.first,
-            prescription: prescription,
-            weightIncrement: exercise.weightIncrement
-        )
+    private func targetLabel(_ target: NextSetTarget) -> String {
+        let reps = "\(target.reps) \(target.reps == 1 ? "rep" : "reps")"
+        guard exercise.loadMode != .bodyweight, let weight = target.weight else {
+            return "Bodyweight × \(reps)"
+        }
+        let load = weight.formatted(.number.precision(.fractionLength(0...1)))
+        let unit = exercise.loadMode == .perHand ? "lb each" : "lb"
+        return "\(load) \(unit) × \(reps)"
     }
 
     /// The collapsed state used to be dead text: the only way back was the small
@@ -239,7 +270,9 @@ struct ExerciseLogCard: View {
     }
 
     private func setNumber(for set: LoggedSet) -> Int {
-        (loggedExercise.sets.firstIndex(where: { $0.id == set.id }) ?? 0) + 1
+        let index = loggedExercise.sets.firstIndex(where: { $0.id == set.id }) ?? 0
+        guard set.setType.countsAsWorking else { return index + 1 }
+        return loggedExercise.sets.prefix(index + 1).filter { $0.setType.countsAsWorking }.count
     }
 
     private var nextSetID: UUID? {
@@ -287,11 +320,27 @@ struct SetLogRow: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            Text("\(number)")
-                .font(.subheadline.monospacedDigit().weight(.bold))
-                .foregroundStyle(.secondary)
-                .frame(width: 22)
-                .accessibilityHidden(true)
+            Menu {
+                Picker("Set type", selection: $set.setType) {
+                    ForEach(WorkoutSetType.allCases) { type in
+                        Text(type.title).tag(type)
+                    }
+                }
+            } label: {
+                VStack(spacing: 1) {
+                    Text(set.setType == .warmup ? "WU" : "\(number)")
+                        .font(.caption.monospacedDigit().weight(.bold))
+                    if set.setType == .backoff {
+                        Text("BACK")
+                            .font(.system(size: 7, weight: .bold, design: .rounded))
+                    }
+                }
+                .foregroundStyle(set.setType == .working ? .secondary : TodayPalette.warm)
+                .frame(width: 38, height: 42)
+                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10))
+            }
+            .accessibilityLabel("Set \(number), \(set.setType.title)")
+            .accessibilityHint("Changes whether this is a working, warm-up, or backoff set")
 
             if exercise.loadMode != .bodyweight {
                 ValueStepper(
@@ -317,7 +366,10 @@ struct SetLogRow: View {
             )
 
             Button {
-                withAnimation(.snappy) { set.isComplete.toggle() }
+                withAnimation(.snappy) {
+                    set.isComplete.toggle()
+                    set.completedAt = set.isComplete ? Date() : nil
+                }
             } label: {
                 Image(systemName: set.isComplete ? "checkmark.circle.fill" : "circle")
                     .font(.title2)
@@ -340,7 +392,9 @@ struct SetLogRow: View {
         // outside the set row still scales the whole way.
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         .background(
-            set.isComplete ? Color.green.opacity(0.075) : Color(.tertiarySystemGroupedBackground),
+            set.isComplete
+                ? (set.setType == .warmup ? TodayPalette.warm.opacity(0.08) : Color.green.opacity(0.075))
+                : Color(.tertiarySystemGroupedBackground),
             in: RoundedRectangle(cornerRadius: 15)
         )
         .overlay {
