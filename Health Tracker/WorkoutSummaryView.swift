@@ -5,16 +5,24 @@ struct WorkoutSummaryView: View {
     let session: WorkoutSession
     @ObservedObject var store: TodayStore
     @ObservedObject var catalog: ExerciseCatalog
+    let onReopen: (() -> Void)?
+    @State private var showUndoConfirmation = false
 
-    private var scores: [MuscleGroup: Double] {
-        store.muscleScores(for: session, catalog: catalog)
+    init(
+        session: WorkoutSession,
+        store: TodayStore,
+        catalog: ExerciseCatalog,
+        onReopen: (() -> Void)? = nil
+    ) {
+        self.session = session
+        self.store = store
+        self.catalog = catalog
+        self.onReopen = onReopen
     }
 
-    private var trainedMuscles: [(muscle: MuscleGroup, value: Double)] {
-        scores
-            .filter { $0.value > 0 }
-            .sorted { $0.value > $1.value }
-            .map { (muscle: $0.key, value: $0.value) }
+    private var completedAreas: [WorkoutMuscleArea] {
+        let completed = WorkoutMuscleCoverage.completed(in: session, catalog: catalog)
+        return WorkoutMuscleArea.allCases.filter(completed.contains)
     }
 
     var body: some View {
@@ -29,12 +37,16 @@ struct WorkoutSummaryView: View {
                         StatTile(session.durationLabel ?? "In progress", "time")
                     }
 
-                    MuscleMapView(scores: scores)
-                        .padding(18)
-                        .frame(maxWidth: .infinity)
-                        .todayCard()
+                    MuscleBreakdownCard(title: "Muscles hit", areas: completedAreas)
 
-                    musclesHit
+                    highlights
+                    exerciseProgress
+
+                    Button("Undo finish and reopen", systemImage: "arrow.uturn.backward") {
+                        showUndoConfirmation = true
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(store.activeWorkout != nil)
 
                     Text("Exercise details and weights stay private. The public site only needs to know that the lift happened.")
                         .font(.footnote)
@@ -52,6 +64,24 @@ struct WorkoutSummaryView: View {
                     Button("Done") { dismiss() }
                 }
             }
+            .confirmationDialog(
+                "Reopen this workout?",
+                isPresented: $showUndoConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Reopen workout") {
+                    if store.undoFinishedWorkout(id: session.id) {
+                        if let onReopen {
+                            onReopen()
+                        } else {
+                            dismiss()
+                        }
+                    }
+                }
+                Button("Keep finished", role: .cancel) {}
+            } message: {
+                Text("The workout returns to the active logger with every set intact.")
+            }
         }
     }
 
@@ -61,7 +91,7 @@ struct WorkoutSummaryView: View {
                 .font(.system(size: 48))
                 .foregroundStyle(.green)
                 .accessibilityHidden(true)
-            Text(session.kind.completionTitle)
+            Text(session.completionTitle)
                 .font(.title2.weight(.bold))
                 .multilineTextAlignment(.center)
             Text(
@@ -73,33 +103,115 @@ struct WorkoutSummaryView: View {
         }
     }
 
-    @ViewBuilder
-    private var musclesHit: some View {
+    private var highlights: some View {
+        HStack(spacing: 10) {
+            StatTile(personalRecordCount, "PRs")
+            StatTile(improvedExerciseCount, "improved")
+            StatTile(session.exercises.flatMap(\.sets).filter { $0.setType == .warmup && $0.isPerformed }.count, "warm-ups")
+        }
+    }
+
+    private var exerciseProgress: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Muscles hit")
+            Text("Progress and next targets")
                 .font(.headline)
-            if trainedMuscles.isEmpty {
-                Text("No completed sets were mapped to a muscle group.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            } else {
-                FlowLayout(spacing: 8) {
-                    ForEach(trainedMuscles, id: \.muscle) { entry in
-                        Text(entry.muscle.title)
-                            .font(.caption.weight(.semibold))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
-                            .background(
-                                TodayPalette.muscle.opacity(min(0.22, 0.08 + entry.value / 30)),
-                                in: Capsule()
-                            )
+            ForEach(session.exercises.filter { $0.sets.contains(where: \.isWorkingSet) }) { logged in
+                if let exercise = catalog.exercise(id: logged.exerciseID) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(exercise.name)
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            Text(bestSetLabel(for: logged, exercise: exercise))
+                                .font(.caption.monospacedDigit().weight(.semibold))
+                        }
+                        Text(progressNote(for: logged, exercise: exercise))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if logged.id != session.exercises.filter({ $0.sets.contains(where: \.isWorkingSet) }).last?.id {
+                        Divider()
                     }
                 }
             }
         }
-        .padding(18)
+        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .todayCard()
+    }
+
+    private var earlierWorkouts: [WorkoutSession] {
+        store.workouts.filter { $0.id != session.id && $0.startedAt < session.startedAt }
+    }
+
+    private func priorPerformances(for exerciseID: String) -> [LoggedExercise] {
+        earlierWorkouts.compactMap { workout in
+            workout.exercises.first { $0.exerciseID == exerciseID && $0.sets.contains(where: \.isWorkingSet) }
+        }
+    }
+
+    private var personalRecordCount: Int {
+        session.exercises.reduce(0) { total, logged in
+            guard let exercise = catalog.exercise(id: logged.exerciseID),
+                  let current = bestEstimate(logged, exercise: exercise) else { return total }
+            let previous = priorPerformances(for: logged.exerciseID)
+                .compactMap { bestEstimate($0, exercise: exercise) }
+                .max() ?? -.infinity
+            return total + (current > previous ? 1 : 0)
+        }
+    }
+
+    private var improvedExerciseCount: Int {
+        session.exercises.reduce(0) { total, logged in
+            guard let previous = priorPerformances(for: logged.exerciseID).first else { return total }
+            let currentReps = logged.sets.filter(\.isWorkingSet).reduce(0) { $0 + $1.reps }
+            let previousReps = previous.sets.filter(\.isWorkingSet).reduce(0) { $0 + $1.reps }
+            return total + (currentReps > previousReps ? 1 : 0)
+        }
+    }
+
+    private func bestEstimate(_ logged: LoggedExercise, exercise: ExerciseDefinition) -> Double? {
+        logged.sets.filter(\.isProgressionSet).map { set in
+            let load = set.weight ?? 0
+            return load > 0 ? load * (1 + Double(set.reps) / 30) : Double(set.reps)
+        }.max()
+    }
+
+    private func bestSetLabel(for logged: LoggedExercise, exercise: ExerciseDefinition) -> String {
+        let sets = logged.sets.filter(\.isProgressionSet)
+        guard let best = sets.max(by: { lhs, rhs in
+            let left = (lhs.weight ?? 0) * (1 + Double(lhs.reps) / 30)
+            let right = (rhs.weight ?? 0) * (1 + Double(rhs.reps) / 30)
+            return left < right
+        }) else { return "" }
+        return SetSummary.text(for: best, exercise: exercise, includingUnit: false)
+    }
+
+    private func progressNote(for logged: LoggedExercise, exercise: ExerciseDefinition) -> String {
+        let previous = priorPerformances(for: logged.exerciseID)
+        let currentReps = logged.sets.filter(\.isWorkingSet).reduce(0) { $0 + $1.reps }
+        let comparison: String
+        if let prior = previous.first {
+            let priorReps = prior.sets.filter(\.isWorkingSet).reduce(0) { $0 + $1.reps }
+            let delta = currentReps - priorReps
+            comparison = delta == 0 ? "Matched last session's total reps." : "\(abs(delta)) total reps \(delta > 0 ? "above" : "below") last session."
+        } else {
+            comparison = "First comparable session recorded."
+        }
+
+        guard let last = logged.sets.last(where: \.isWorkingSet) else { return comparison }
+        var seed = last
+        seed.isComplete = false
+        seed.completedAt = nil
+        let next = LoggedExercise(exerciseID: logged.exerciseID, sets: [seed])
+        guard let target = HypertrophyProgramming.nextSetTarget(
+            current: next,
+            history: [logged] + previous,
+            exercise: exercise
+        ) else { return comparison }
+        let load = target.weight.map { "\($0.formatted(.number.precision(.fractionLength(0...1)))) lb × " } ?? ""
+        return "\(comparison) Next: \(load)\(target.reps) reps."
     }
 
 }
@@ -143,4 +255,3 @@ struct FlowLayout: Layout {
         }
     }
 }
-

@@ -79,7 +79,7 @@ struct TrainingPulseSnapshot: Equatable {
             let day = calendar.startOfDay(for: workout.startedAt)
             for logged in workout.exercises {
                 guard let exercise = catalog.exercise(id: logged.exerciseID) else { continue }
-                let performed = logged.sets.filter(\.isPerformed)
+                let performed = logged.sets.filter(\.isWorkingSet)
                 guard !performed.isEmpty else { continue }
 
                 hardSets += performed.count
@@ -147,7 +147,7 @@ struct TrainingPulseCard: View {
             }
 
             if snapshot.hardSets == 0 {
-                Text("Complete a workout and Today will map your seven-day training dose here.")
+                Text("Complete a workout and Today will summarize your seven-day training dose here.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
@@ -161,7 +161,7 @@ struct TrainingPulseCard: View {
                 NavigationLink {
                     MuscleExposureDetailView(scores: muscleScores)
                 } label: {
-                    Label("Muscle map", systemImage: "figure.strengthtraining.traditional")
+                    Label("Muscle breakdown", systemImage: "list.bullet.rectangle")
                         .frame(maxWidth: .infinity)
                 }
                 NavigationLink {
@@ -278,16 +278,47 @@ struct TrainingPulseCard: View {
 private struct MuscleExposureDetailView: View {
     let scores: [MuscleGroup: Double]
 
+    private var activeMuscles: [(muscle: MuscleGroup, score: Double)] {
+        scores
+            .filter { $0.value > 0 }
+            .map { (muscle: $0.key, score: $0.value) }
+            .sorted { $0.score == $1.score ? $0.muscle.title < $1.muscle.title : $0.score > $1.score }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Completed sets color the muscles each exercise is mapped to. This is an exposure estimate, not a measurement of activation, fatigue, or growth.")
+                Text("Completed sets are broken down using each exercise’s muscle mapping. This is an exposure estimate, not a measurement of activation, fatigue, or growth.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                MuscleMapView(scores: scores)
-                    .padding(16)
-                    .todayCard()
+
+                VStack(spacing: 12) {
+                    ForEach(activeMuscles, id: \.muscle) { entry in
+                        VStack(spacing: 6) {
+                            HStack {
+                                Text(entry.muscle.title)
+                                    .font(.subheadline.weight(.semibold))
+                                Spacer()
+                                Text(entry.score.formatted(.number.precision(.fractionLength(0...1))))
+                                    .font(.caption.monospacedDigit().weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                            GeometryReader { proxy in
+                                ZStack(alignment: .leading) {
+                                    Capsule().fill(Color.primary.opacity(0.07))
+                                    Capsule()
+                                        .fill(TodayPalette.muscle.gradient)
+                                        .frame(width: proxy.size.width * min(1, entry.score / 12))
+                                }
+                            }
+                            .frame(height: 7)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+                .padding(16)
+                .todayCard()
             }
             .padding(16)
         }

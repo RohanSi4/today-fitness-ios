@@ -5,6 +5,9 @@ struct HistoryView: View {
     @ObservedObject var store: TodayStore
     @ObservedObject var catalog: ExerciseCatalog
     @State private var pendingWorkoutDeletion: WorkoutSession?
+    @State private var selectedWeightForEditing: WeightEntry?
+    @State private var pendingWeightDeletion: WeightEntry?
+    @State private var weightErrorMessage: String?
 
     private var isEmpty: Bool {
         store.workouts.isEmpty && store.weights.isEmpty && store.dataRecoveryMessage == nil
@@ -51,6 +54,29 @@ struct HistoryView: View {
             if let session = pendingWorkoutDeletion {
                 Text("This removes \(session.completedSetCount) working sets and changes progression history.")
             }
+        }
+        .confirmationDialog(
+            "Delete this weight?",
+            isPresented: weightDeletionConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete weight", role: .destructive) {
+                guard let entry = pendingWeightDeletion else { return }
+                Task { await deleteWeight(entry) }
+            }
+            Button("Keep weight", role: .cancel) { pendingWeightDeletion = nil }
+        } message: {
+            if let entry = pendingWeightDeletion {
+                Text("Removes \(entry.pounds.formatted(.number.precision(.fractionLength(1)))) lb from \(entry.date.formatted(.dateTime.month().day())).")
+            }
+        }
+        .sheet(item: $selectedWeightForEditing) { entry in
+            WeightLogView(store: store, entryToEdit: entry)
+        }
+        .alert("Could not delete weight", isPresented: weightErrorBinding) {
+            Button("OK", role: .cancel) { weightErrorMessage = nil }
+        } message: {
+            Text(weightErrorMessage ?? "Try again.")
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -149,6 +175,23 @@ struct HistoryView: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(weightAccessibilityLabel(entry, change: change))
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button("Delete", systemImage: "trash", role: .destructive) {
+                pendingWeightDeletion = entry
+            }
+            Button("Edit", systemImage: "pencil") {
+                selectedWeightForEditing = entry
+            }
+            .tint(TodayPalette.accent)
+        }
+        .contextMenu {
+            Button("Correct weight", systemImage: "pencil") {
+                selectedWeightForEditing = entry
+            }
+            Button("Delete weight", systemImage: "trash", role: .destructive) {
+                pendingWeightDeletion = entry
+            }
+        }
     }
 
     private func weightAccessibilityLabel(_ entry: WeightEntry, change: Double?) -> String {
@@ -183,7 +226,7 @@ struct HistoryView: View {
         var load: [TrainingRegion: Double] = [:]
         for logged in session.exercises {
             guard let exercise = catalog.exercise(id: logged.exerciseID) else { continue }
-            let sets = logged.sets.filter(\.isPerformed).count
+            let sets = logged.sets.filter(\.isWorkingSet).count
             guard sets > 0 else { continue }
             for contribution in exercise.muscles where contribution.intensity >= 0.5 {
                 load[TrainingRegion.region(for: contribution.muscle), default: 0] += Double(sets) * contribution.intensity
@@ -209,7 +252,36 @@ struct HistoryView: View {
     private var deletionTitle: String {
         guard let session = pendingWorkoutDeletion else { return "Delete workout?" }
         let date = session.startedAt.formatted(.dateTime.month().day())
-        return "Delete \(session.kind.workoutTitle) from \(date)?"
+        return "Delete \(session.workoutTitle) from \(date)?"
+    }
+
+    private var weightDeletionConfirmation: Binding<Bool> {
+        Binding(
+            get: { pendingWeightDeletion != nil },
+            set: { if !$0 { pendingWeightDeletion = nil } }
+        )
+    }
+
+    private var weightErrorBinding: Binding<Bool> {
+        Binding(
+            get: { weightErrorMessage != nil },
+            set: { if !$0 { weightErrorMessage = nil } }
+        )
+    }
+
+    @MainActor
+    private func deleteWeight(_ entry: WeightEntry) async {
+        if entry.healthKitOwnedByToday == true, let sampleID = entry.healthKitID {
+            do {
+                try await HealthKitManager.shared.deleteBodyWeight(id: sampleID)
+            } catch {
+                weightErrorMessage = "Today left the entry untouched because Apple Health could not delete its copy: \(error.localizedDescription)"
+                pendingWeightDeletion = nil
+                return
+            }
+        }
+        store.deleteWeight(id: entry.id)
+        pendingWeightDeletion = nil
     }
 }
 
@@ -229,7 +301,7 @@ private struct WorkoutHistoryRow: View {
                 .frame(width: 36, height: 36)
                 .background(TodayPalette.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
             VStack(alignment: .leading, spacing: 3) {
-                Text(session.kind.workoutTitle)
+                Text(session.workoutTitle)
                     .font(.subheadline.weight(.semibold))
                 // The month is the section header, so the row only needs the day
                 // — which frees the rest of the line for what was trained.
@@ -252,48 +324,156 @@ private struct WorkoutHistoryRow: View {
 }
 
 private struct WorkoutDetailView: View {
-    let session: WorkoutSession
-    let store: TodayStore
-    let catalog: ExerciseCatalog
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var appState: AppState
+    @ObservedObject var store: TodayStore
+    @ObservedObject var catalog: ExerciseCatalog
+    @State private var draft: WorkoutSession
+    @State private var isEditing = false
+    @State private var showReopenConfirmation = false
+
+    init(session: WorkoutSession, store: TodayStore, catalog: ExerciseCatalog) {
+        self.store = store
+        self.catalog = catalog
+        _draft = State(initialValue: session)
+    }
+
+    private var completedAreas: [WorkoutMuscleArea] {
+        let completed = WorkoutMuscleCoverage.completed(in: draft, catalog: catalog)
+        return WorkoutMuscleArea.allCases.filter(completed.contains)
+    }
 
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
                 HStack(spacing: 10) {
-                    StatTile(session.completedExerciseCount, "exercises")
-                    StatTile(session.completedSetCount, "sets")
-                    StatTile(session.durationLabel ?? "In progress", "time")
+                    StatTile(draft.completedExerciseCount, "exercises")
+                    StatTile(draft.completedSetCount, "sets")
+                    StatTile(draft.durationLabel ?? "In progress", "time")
                 }
 
-                MuscleMapView(scores: store.muscleScores(for: session, catalog: catalog), compact: true)
-                    .padding(16)
-                    .frame(maxWidth: .infinity)
-                    .todayCard()
+                MuscleBreakdownCard(title: "Muscles hit", areas: completedAreas)
 
-                ForEach(session.exercises.filter { $0.sets.contains(where: \.isPerformed) }) { logged in
-                    if let exercise = catalog.exercise(id: logged.exerciseID) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text(exercise.name).font(.headline)
-                            ForEach(Array(logged.sets.filter(\.isPerformed).enumerated()), id: \.element.id) { index, set in
-                                HStack {
-                                    Text("Set \(index + 1)").foregroundStyle(.secondary)
-                                    Spacer()
-                                    Text(SetSummary.text(for: set, exercise: exercise, includingUnit: true))
-                                        .font(.subheadline.monospacedDigit().weight(.semibold))
-                                }
-                                .accessibilityElement(children: .combine)
-                            }
-                        }
-                        .padding(16)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .todayCard()
-                    }
-                }
+                if isEditing { editableExercises } else { readOnlyExercises }
             }
             .padding(16)
         }
         .background(Color(.systemGroupedBackground))
-        .navigationTitle(session.kind.workoutTitle)
+        .navigationTitle(draft.workoutTitle)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                if isEditing {
+                    Button("Cancel") {
+                        if let current = store.workouts.first(where: { $0.id == draft.id }) {
+                            draft = current
+                        }
+                        isEditing = false
+                    }
+                    Button("Save") {
+                        store.updateWorkout(draft)
+                        isEditing = false
+                    }
+                    .fontWeight(.semibold)
+                    .disabled(draft.completedSetCount == 0)
+                } else {
+                    Menu {
+                        Button("Edit sets", systemImage: "pencil") { isEditing = true }
+                        Button("Reopen workout", systemImage: "arrow.uturn.backward") {
+                            showReopenConfirmation = true
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .accessibilityLabel("Workout actions")
+                }
+            }
+        }
+        .confirmationDialog(
+            "Reopen this workout?",
+            isPresented: $showReopenConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Reopen and continue") {
+                if store.reopenWorkout(id: draft.id) {
+                    dismiss()
+                    appState.openWorkout()
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(store.activeWorkout == nil
+                ? "The workout returns to the active logger so you can correct or add sets."
+                : "Finish or discard the active workout before reopening another one.")
+        }
+    }
+
+    private var readOnlyExercises: some View {
+        ForEach(draft.exercises.filter { $0.sets.contains(where: \.isPerformed) }) { logged in
+            if let exercise = catalog.exercise(id: logged.exerciseID) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(exercise.name).font(.headline)
+                    ForEach(Array(logged.sets.filter(\.isPerformed).enumerated()), id: \.element.id) { index, set in
+                        HStack {
+                            Text(set.setType == .working ? "Set \(index + 1)" : set.setType.title)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text(SetSummary.text(for: set, exercise: exercise, includingUnit: true))
+                                .font(.subheadline.monospacedDigit().weight(.semibold))
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .todayCard()
+            }
+        }
+    }
+
+    private var editableExercises: some View {
+        ForEach($draft.exercises) { $logged in
+            if let exercise = catalog.exercise(id: logged.exerciseID) {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text(exercise.name).font(.headline)
+                        Spacer()
+                        Button(role: .destructive) {
+                            draft.exercises.removeAll { $0.id == logged.id }
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .accessibilityLabel("Remove \(exercise.name)")
+                    }
+                    ForEach($logged.sets) { $set in
+                        HStack(spacing: 4) {
+                            SetLogRow(
+                                number: setNumber(set.id, in: logged),
+                                exercise: exercise,
+                                set: $set,
+                                isNext: false
+                            )
+                            Button(role: .destructive) {
+                                logged.sets.removeAll { $0.id == set.id }
+                            } label: {
+                                Image(systemName: "minus.circle.fill")
+                                    .frame(width: 36, height: 44)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Delete set")
+                        }
+                    }
+                    Button("Add set", systemImage: "plus") { logged.addSet() }
+                        .font(.subheadline.weight(.semibold))
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .todayCard()
+            }
+        }
+    }
+
+    private func setNumber(_ id: UUID, in exercise: LoggedExercise) -> Int {
+        (exercise.sets.firstIndex(where: { $0.id == id }) ?? 0) + 1
     }
 }

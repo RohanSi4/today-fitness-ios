@@ -128,7 +128,8 @@ struct TodayStoreTests {
     }
 
     @Test func completedWorkoutCanBeDeleted() throws {
-        let store = TodayStore(storageURL: temporaryURL("delete-workout"))
+        let storeURL = temporaryURL("delete-workout")
+        let store = TodayStore(storageURL: storeURL)
         let catalog = ExerciseCatalog(cacheURL: temporaryURL("delete-catalog"))
         store.beginWorkout(kind: .upper, catalog: catalog)
         var workout = try #require(store.activeWorkout)
@@ -139,6 +140,76 @@ struct TodayStoreTests {
         store.deleteWorkout(id: finished.id)
 
         #expect(store.workouts.isEmpty)
+        #expect(store.syncSnapshot.deletedWorkoutIDs == [finished.id])
+
+        let relaunched = TodayStore(storageURL: storeURL)
+        #expect(relaunched.syncSnapshot.deletedWorkoutIDs == [finished.id])
+    }
+
+    @Test func finishedWorkoutCanBeReopenedWithoutLosingSets() throws {
+        let store = TodayStore(storageURL: temporaryURL("reopen-workout"))
+        let catalog = ExerciseCatalog(cacheURL: temporaryURL("reopen-catalog"))
+        store.beginWorkout(template: HypertrophyProgramming.upperA, catalog: catalog)
+        var workout = try #require(store.activeWorkout)
+        workout.exercises[0].sets[0].isComplete = true
+        workout.exercises[0].sets[0].completedAt = .now
+        store.updateActiveWorkout(workout)
+        let finished = try #require(store.finishActiveWorkout())
+
+        #expect(store.reopenWorkout(id: finished.id))
+        #expect(store.workouts.isEmpty)
+        #expect(store.activeWorkout?.id == finished.id)
+        #expect(store.activeWorkout?.endedAt == nil)
+        #expect(store.activeWorkout?.exercises[0].sets[0].completedAt != nil)
+    }
+
+    @Test func completedWorkoutCorrectionsPersist() throws {
+        let url = temporaryURL("correct-workout")
+        let store = TodayStore(storageURL: url)
+        let catalog = ExerciseCatalog(cacheURL: temporaryURL("correct-catalog"))
+        store.beginWorkout(kind: .upper, catalog: catalog)
+        var workout = try #require(store.activeWorkout)
+        workout.exercises[0].sets[0].isComplete = true
+        store.updateActiveWorkout(workout)
+        var finished = try #require(store.finishActiveWorkout())
+        finished.exercises[0].sets[0].reps = 11
+        finished.exercises[0].sets[0].setType = .backoff
+
+        store.updateWorkout(finished)
+
+        let reopened = TodayStore(storageURL: url)
+        #expect(reopened.workouts[0].exercises[0].sets[0].reps == 11)
+        #expect(reopened.workouts[0].exercises[0].sets[0].setType == .backoff)
+    }
+
+    @Test func routineEditsAndGoalWeightPersist() throws {
+        let url = temporaryURL("routine-persistence")
+        let store = TodayStore(storageURL: url)
+        var routine = try #require(store.routine(id: "upper-a"))
+        routine.title = "Upper Prime"
+        routine.exercises[0].sets = 3
+
+        store.updateRoutine(routine)
+        store.updateGoalWeight(181.5)
+
+        let reopened = TodayStore(storageURL: url)
+        #expect(reopened.routine(id: "upper-a")?.title == "Upper Prime")
+        #expect(reopened.routine(id: "upper-a")?.exercises[0].sets == 3)
+        #expect(reopened.goalWeight == 181.5)
+    }
+
+    @Test func warmupOnlyWorkoutCannotFinish() throws {
+        let store = TodayStore(storageURL: temporaryURL("warmup-only"))
+        let catalog = ExerciseCatalog(cacheURL: temporaryURL("warmup-only-catalog"))
+        store.beginWorkout(kind: .upper, catalog: catalog)
+        var workout = try #require(store.activeWorkout)
+        workout.exercises[0].sets[0].setType = .warmup
+        workout.exercises[0].sets[0].isComplete = true
+        workout.exercises[0].sets[0].completedAt = .now
+        store.updateActiveWorkout(workout)
+
+        #expect(store.finishActiveWorkout() == nil)
+        #expect(store.activeWorkout != nil)
     }
 
     @Test func activeWorkoutSurvivesStoreRelaunch() throws {

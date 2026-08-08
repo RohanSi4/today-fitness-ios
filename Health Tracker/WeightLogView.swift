@@ -12,6 +12,7 @@ struct WeightLogView: View {
     @State private var errorMessage: String?
     /// Set only when the weight is safely stored but Apple Health refused it.
     @State private var healthWriteFailure: String?
+    private let entryToEdit: WeightEntry?
     @FocusState private var isWeightFieldFocused: Bool
 
     private let healthStore: BodyWeightHealthStoring
@@ -19,13 +20,17 @@ struct WeightLogView: View {
 
     init(
         store: TodayStore,
+        entryToEdit: WeightEntry? = nil,
         healthStore: BodyWeightHealthStoring = HealthKitManager.shared,
         reminders: WeightReminderScheduling = NotificationManager.shared
     ) {
         self.store = store
+        self.entryToEdit = entryToEdit
         self.healthStore = healthStore
         self.reminders = reminders
-        _value = State(initialValue: store.latestWeight?.pounds ?? 184.4)
+        _value = State(initialValue: entryToEdit?.pounds ?? store.latestWeight?.pounds ?? 184.4)
+        _date = State(initialValue: entryToEdit?.date ?? Date())
+        _showBackdate = State(initialValue: entryToEdit != nil)
     }
 
     var body: some View {
@@ -38,7 +43,7 @@ struct WeightLogView: View {
                 }
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle("Morning weight")
+            .navigationTitle(entryToEdit == nil ? "Morning weight" : "Correct weight")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -152,14 +157,14 @@ struct WeightLogView: View {
                 if isSaving {
                     ProgressView().frame(maxWidth: .infinity)
                 } else {
-                    Text("Save weight").frame(maxWidth: .infinity)
+                    Text(entryToEdit == nil ? "Save weight" : "Save correction").frame(maxWidth: .infinity)
                 }
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
             .disabled(isSaving || value <= 0)
 
-            Text("The exact number stays private unless you choose to share a small progress summary in Coach sync.")
+            Text("The exact number stays private in Today, Apple Health, and the encrypted coach sync.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

@@ -26,7 +26,7 @@ enum SetSummary {
         limit: Int? = nil,
         separator: String = ", "
     ) -> String {
-        var performed = sets.filter(\.isPerformed)
+        var performed = sets.filter(\.isWorkingSet)
         if let limit { performed = Array(performed.prefix(limit)) }
         return performed
             .map { text(for: $0, exercise: exercise) }

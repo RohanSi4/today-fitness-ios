@@ -65,7 +65,7 @@ the assertion.
 - **Widget data crosses an App Group** (`group.rohansingh.today`).
   `TodayWidgetShared/TodayWidgetSnapshot.swift` is the shared contract — changing its
   shape requires rebuilding both targets.
-- **`web/` is a standalone Next.js app that CI does not touch.** `ci.yml` is iOS-only.
+- **`web/` is a standalone Next.js app.** CI audits, lints, and builds it in a separate Linux job; the iOS job remains isolated on macOS.
 - **Coach sync has a strict production-endpoint allowlist** (`DataSafetyTests`). Tests
   must stay isolated from real sync. Treat that as an invariant.
 

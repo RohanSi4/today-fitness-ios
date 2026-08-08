@@ -35,6 +35,7 @@ xcodebuild build \
   -scheme "Health Tracker" \
   -destination "id=$DEVICE" \
   -derivedDataPath "$DERIVED" \
+  -allowProvisioningUpdates \
   -quiet
 
 xcrun devicectl device install app \

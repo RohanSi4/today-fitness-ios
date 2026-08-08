@@ -33,31 +33,32 @@ it can become a reusable starter after the real workflow is proven.
 - Links directly to those App Shortcuts so they are easy to add to Siri or an Action Button
 - Sends the coach's distance goal into Apple Workout with WorkoutKit, without starting a second workout session
 - Reuses the previous exercise order and values for each named workout type
-- Uses exactly two default working sets, with an optional extra set for strong days
+- Starts from editable Upper A, Lower A, Upper B, and Lower B routines with per-exercise set targets
+- Distinguishes warm-up, working, and backoff sets so preparation does not inflate progression or volume
+- Counts upward from the last completed set instead of forcing a rest countdown
 - Adjusts weight by exercise-specific increments and reps one at a time
 - Keeps dumbbell loads per hand and unilateral reps per side
 - Shows the last three performances for each exercise
 - Reuses the last completed values when an exercise is added during a workout
 - Keeps recent exercises at the top and lets several be added in one pass
 - Folds completed exercises down and moves the next unfinished work into view
-- Lets exercises move up or down when gym equipment is busy
+- Reorders exercises by touch-and-hold drag when gym equipment is busy
 - Lets me close a workout, use the rest of the app, and resume with every set intact
 - Keeps discard in a secondary menu with a confirmation instead of making it the main exit
 - Keeps run stretches as a quick visual reference instead of making every session a checklist
 - Focuses the warm-up on seven marathon-relevant dynamic moves and trims the post-run list to five useful holds
 - Adds a timer-first post-run flow that waits for play, guides 30-second holds, gives 5 seconds to switch, and supports pause, back, skip, and a routine wheel
 - Searches an offline-cached catalog of more than 700 lifting exercises
-- Lights up a detailed front and back muscle map as sets are completed
-- Keeps the full muscle map tucked away during the workout, then shows it in the recap
-- Shows workout duration, weekly training totals, strength records, and a private 30-day weight trend
-- Lets a bad workout be removed from History before it affects future defaults
+- Shows a compact live coverage card with direct working-set counts and any planned muscles still missing
+- Shows workout duration, PRs, next targets, weekly training totals, actionable strength trends, and a private 30-day weight trend
+- Lets workouts and weights be corrected, deleted, or reopened from History without rebuilding them
 - Debounces live workout saves, protects the file while the phone is locked, and keeps a last-good backup
 - Preserves the original sleep, movement, and daily recap experience under Insights
 - Encrypts the full weight and lifting snapshot with AES-256-GCM before upload
 - Keeps the phone write token and encryption key in Keychain
 - Saves first, retries failed syncs later, and shows the connection state in Insights
 - Publishes only split, duration, working sets, and broad muscle groups to the fitness page
-- Lets me opt into a small public weight summary without publishing the daily history
+- Never publishes exact weight or a weight summary to the public site
 - Includes App Store privacy manifests for health, fitness, app settings, and App Group settings
 
 ## The private data boundary
@@ -70,7 +71,7 @@ Public coaching plan
         │
         ├── protected local history
         ├── AES-256-GCM private snapshot ─► website transport ─► coach decrypts
-        └── safe strength + optional weight summary ─────────► fitness page
+        └── safe strength summary ───────────────────────────► fitness page
 
 Apple Watch workout ─► Apple Health ─► HealthFit ─► marathon coach
         ▲
@@ -83,9 +84,8 @@ Training workout cannot capture.
 
 Exercise choices, reps, lifting weights, and daily weight history do not go to the public
 fitness dashboard. The public strength view uses split, duration, working-set count,
-and broad muscle frequency without exposing the underlying gym log. Weight progress is
-off by default. If I turn it on, the site gets the current number, 7-day average,
-28-day change, goal, and logging consistency instead of the raw history.
+and broad muscle frequency without exposing the underlying gym log. No body-weight
+number, average, change, goal, or logging history is sent to the public site.
 
 ## Exercise catalog and anatomy
 
@@ -128,8 +128,8 @@ Today adds a more detailed local mapping for the exercises that matter, includin
 - individual quad regions, hamstrings, glutes, adductors, and abductors
 - gastrocnemius, soleus, abs, obliques, tibialis anterior, and lower back
 
-The heat map scores completed working sets. It does not compare raw machine tonnage
-across unrelated exercises.
+The live coverage view counts direct completed working sets. Warm-ups stay out of the
+dose, and Today does not compare raw machine tonnage across unrelated exercises.
 
 Because I normally use lifting straps for back work, incidental grip work from an
 imported pulling exercise does not light the forearms. Curls can still give them a
@@ -153,8 +153,8 @@ SwiftUI app shell
     │   └── WorkoutLogView
     ├── History
     └── Insights
-        ├── MuscleMapView
-        ├── private weight and strength trends
+        ├── actionable private weight and strength trends
+        ├── editable hypertrophy routines
         └── DailyRecapView
 
 TodayStore
@@ -167,7 +167,7 @@ CoachSyncService
     ├── local-first retry state
     ├── AES-256-GCM private snapshot
     ├── strict production endpoint boundary
-    └── smaller consent-controlled public projection
+    └── smaller strength-only public projection
 
 HealthKitManager
     ├── read sleep and movement
@@ -206,7 +206,7 @@ The project already uses automatic signing and has Rohan's development team sele
 4. In the top Xcode toolbar, click the device name beside the **Health Tracker** scheme and choose the connected iPhone instead of the simulator.
 5. Press the Run triangle or `Command-R`.
 6. If the phone asks for Developer Mode, open **Settings > Privacy & Security > Developer Mode**, turn it on, restart, confirm it after the restart, then press Run in Xcode again.
-7. On first launch, allow Apple Health access and notifications. Public weight sharing starts off and the workout logger remains separate from the Apple Watch workout record.
+7. On first launch, allow Apple Health access and notifications. The workout logger remains separate from the Apple Watch workout record, and exact weight stays private.
 
 To add the daily widget, hold the iPhone Lock Screen, tap **Customize**, choose
 **Lock Screen**, tap the widget area below the clock, and add **Today**. The rectangular
@@ -234,9 +234,9 @@ while the installed display name is **Today**.
 
 ## Tests
 
-The 59-test suite, 52 unit tests plus 7 UI tests, covers the original sleep scoring and recap correctness plus Today’s
-same-day weight replacement, invalid values, active-workout relaunch, backup recovery,
-two-set workout reset, workout deletion, detailed muscle scoring, prior-value reuse,
+The automated unit and UI suites cover the original sleep scoring and recap correctness plus Today’s
+same-day weight replacement, correction precedence, invalid values, active-workout relaunch, backup recovery,
+routine persistence, workout correction and reopening, warm-up exclusion, detailed muscle scoring, prior-value reuse,
 coach-plan lift detection, weekly plan and actual matching, every widget state, widget
 privacy, stretch routine state, stretch artwork integrity, endpoint allowlisting,
 payload bounds, and isolation from production sync during tests. UI coverage opens the

@@ -12,6 +12,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  web-security:
+    name: Web lint, build, and dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+      - run: npm audit --audit-level=high
+      - run: npm run lint
+      - run: npm run build
+
   build-and-test:
     name: Build and test
     runs-on: macos-15
@@ -83,6 +107,12 @@ jobs:
           echo "udid=$udid" >> "$GITHUB_OUTPUT"
           echo "Selected simulator: $name ($udid)"
 
+      - name: Boot the simulator
+        run: |
+          set -euo pipefail
+          xcrun simctl boot "${{ steps.sim.outputs.udid }}" 2>/dev/null || true
+          xcrun simctl bootstatus "${{ steps.sim.outputs.udid }}" -b
+
       - name: Build the app
         run: |
           set -o pipefail
@@ -121,7 +151,6 @@ jobs:
             -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
             -resultBundlePath TestResults.xcresult \
             -skip-testing:"Health TrackerUITests/ScreenshotWalkthrough" \
-            CODE_SIGNING_ALLOWED=NO \
             test
 
       - name: Summarize results

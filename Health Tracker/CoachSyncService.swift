@@ -46,10 +46,25 @@ protocol CoachSyncing: AnyObject {
 }
 
 private struct PrivateFitnessSnapshot: Encodable {
-    let schemaVersion = 1
+    let schemaVersion = 2
     let generatedAt: Date
     let data: StoredTodayData
     let exerciseDefinitions: [ExerciseDefinition]
+    let exerciseProgramming: [PrivateExerciseProgramming]
+}
+
+/// Export the rules that were active with the snapshot so progression reports do
+/// not have to duplicate app logic or reinterpret old workouts after rules change.
+private struct PrivateExerciseProgramming: Encodable {
+    let exerciseID: String
+    let repRange: PrivateIntegerRange
+    let targetRIR: PrivateIntegerRange
+    let restSeconds: PrivateIntegerRange
+}
+
+private struct PrivateIntegerRange: Encodable {
+    let lower: Int
+    let upper: Int
 }
 
 private struct PublicStrengthSession: Encodable {
@@ -62,15 +77,6 @@ private struct PublicStrengthSession: Encodable {
     let updatedAt: String
 }
 
-private struct PublicWeightTrend: Encodable {
-    let asOf: String
-    let currentPounds: Double
-    let goalPounds: Double
-    let sevenDayAverage: Double
-    let change28Days: Double?
-    let daysLogged28: Int
-}
-
 private struct EncryptedPayload: Encodable {
     let algorithm = "AES-256-GCM"
     let keyId: String
@@ -80,13 +86,12 @@ private struct EncryptedPayload: Encodable {
 }
 
 private struct FitnessSyncBatch: Encodable {
-    let schemaVersion = 1
+    let schemaVersion = 2
     let batchId: String
     let deviceId: String
     let createdAt: String
     let encryption: EncryptedPayload
     let publicStrength: [PublicStrengthSession]
-    let publicWeight: PublicWeightTrend?
 }
 
 private struct FitnessSyncResponse: Decodable {
@@ -101,7 +106,6 @@ final class CoachSyncService: ObservableObject, CoachSyncing {
     @Published private(set) var state: CoachSyncState
     @Published private(set) var lastSyncedAt: Date?
     @Published private(set) var hasPendingChanges: Bool
-    @Published private(set) var sharesWeightTrend: Bool
 
     private let session: URLSession
     private let defaults: UserDefaults
@@ -119,8 +123,9 @@ final class CoachSyncService: ObservableObject, CoachSyncing {
     private static let pairingAccount = "coach-sync-pairing-v1"
     private static let lastSyncedKey = "coachSync.lastSyncedAt"
     private static let pendingKey = "coachSync.hasPendingChanges"
+    private static let syncContractVersionKey = "coachSync.privateSnapshotSchema"
     private static let deviceKey = "coachSync.deviceId"
-    private static let sharesWeightKey = "coachSync.sharesWeightTrend"
+    private static let retiredSharesWeightKey = "coachSync.sharesWeightTrend"
     private static let maximumCoalescedPasses = 3
 
     init(
@@ -133,11 +138,19 @@ final class CoachSyncService: ObservableObject, CoachSyncing {
         self.defaults = defaults
         self.keychain = keychain
         self.retryDelays = retryDelays
+        defaults.removeObject(forKey: Self.retiredSharesWeightKey)
         lastSyncedAt = defaults.object(forKey: Self.lastSyncedKey) as? Date
         hasPendingChanges = defaults.bool(forKey: Self.pendingKey)
-        sharesWeightTrend = defaults.bool(forKey: Self.sharesWeightKey)
         pairing = keychain.load(Self.pairingAccount).flatMap {
             try? JSONDecoder().decode(CoachSyncPairing.self, from: $0)
+        }
+        if pairing != nil,
+           defaults.integer(forKey: Self.syncContractVersionKey) < 3 {
+            // Installing a richer export contract is itself a pending data change.
+            // This makes the normal foreground sync publish it without requiring a
+            // fake workout edit or a manual trip through the Coach Sync screen.
+            hasPendingChanges = true
+            defaults.set(true, forKey: Self.pendingKey)
         }
         state = pairing == nil ? .notConnected : .ready
         if let lastSyncedAt, pairing != nil, !hasPendingChanges {
@@ -178,13 +191,6 @@ final class CoachSyncService: ObservableObject, CoachSyncing {
         state = .ready
     }
 
-    func setWeightTrendSharing(_ enabled: Bool) {
-        guard sharesWeightTrend != enabled else { return }
-        sharesWeightTrend = enabled
-        defaults.set(enabled, forKey: Self.sharesWeightKey)
-        markPending()
-    }
-
     func disconnect() {
         debounceTask?.cancel()
         debounceTask = nil
@@ -195,8 +201,8 @@ final class CoachSyncService: ObservableObject, CoachSyncing {
         lastSyncedAt = nil
         defaults.removeObject(forKey: Self.pendingKey)
         defaults.removeObject(forKey: Self.lastSyncedKey)
-        defaults.removeObject(forKey: Self.sharesWeightKey)
-        sharesWeightTrend = false
+        defaults.removeObject(forKey: Self.syncContractVersionKey)
+        defaults.removeObject(forKey: Self.retiredSharesWeightKey)
         state = .notConnected
     }
 
@@ -268,6 +274,7 @@ final class CoachSyncService: ObservableObject, CoachSyncing {
                 hasPendingChanges = false
                 defaults.set(now, forKey: Self.lastSyncedKey)
                 defaults.set(false, forKey: Self.pendingKey)
+                defaults.set(3, forKey: Self.syncContractVersionKey)
                 state = .synced(now)
                 return
             }
@@ -416,19 +423,50 @@ final class CoachSyncService: ObservableObject, CoachSyncing {
                 .map(\.exerciseID)
         )
         let definitions = usedExerciseIDs.compactMap(catalog.exercise(id:))
+        let programming = usedExerciseIDs.sorted().map { exerciseID in
+            let prescription = HypertrophyProgramming.prescription(for: exerciseID)
+            return PrivateExerciseProgramming(
+                exerciseID: exerciseID,
+                repRange: PrivateIntegerRange(
+                    lower: prescription.reps.lower,
+                    upper: prescription.reps.upper
+                ),
+                targetRIR: PrivateIntegerRange(
+                    lower: prescription.targetRIR.lowerBound,
+                    upper: prescription.targetRIR.upperBound
+                ),
+                restSeconds: PrivateIntegerRange(
+                    lower: prescription.restSeconds.lowerBound,
+                    upper: prescription.restSeconds.upperBound
+                )
+            )
+        }
         let privateData = try Self.encoder.encode(
             PrivateFitnessSnapshot(
                 generatedAt: Date(),
                 data: snapshot,
-                exerciseDefinitions: definitions
+                exerciseDefinitions: definitions,
+                exerciseProgramming: programming
             )
         )
         guard privateData.count <= 900_000 else { throw CoachSyncError.snapshotTooLarge }
-        let sealed = try AES.GCM.seal(privateData, using: SymmetricKey(data: rawKey))
-        let nonce = sealed.nonce.withUnsafeBytes { Data($0) }
+        let batchID = "batch_\(UUID().uuidString.lowercased())"
+        let deviceID = deviceID
         let now = Self.isoFormatter.string(from: Date())
+        let authenticatedMetadata = Self.authenticatedMetadata(
+            batchID: batchID,
+            deviceID: deviceID,
+            createdAt: now,
+            keyID: pairing.keyId
+        )
+        let sealed = try AES.GCM.seal(
+            privateData,
+            using: SymmetricKey(data: rawKey),
+            authenticating: authenticatedMetadata
+        )
+        let nonce = sealed.nonce.withUnsafeBytes { Data($0) }
         return FitnessSyncBatch(
-            batchId: "batch_\(UUID().uuidString.lowercased())",
+            batchId: batchID,
             deviceId: deviceID,
             createdAt: now,
             encryption: EncryptedPayload(
@@ -437,30 +475,7 @@ final class CoachSyncService: ObservableObject, CoachSyncing {
                 ciphertext: sealed.ciphertext.base64EncodedString(),
                 tag: sealed.tag.base64EncodedString()
             ),
-            publicStrength: publicStrength(snapshot.workouts, catalog: catalog),
-            publicWeight: sharesWeightTrend ? publicWeight(snapshot) : nil
-        )
-    }
-
-    private func publicWeight(_ snapshot: StoredTodayData) -> PublicWeightTrend? {
-        guard let latest = snapshot.weights.max(by: { $0.date < $1.date }) else { return nil }
-        let calendar = Calendar.current
-        let latestDay = calendar.startOfDay(for: latest.date)
-        let sevenDayStart = calendar.date(byAdding: .day, value: -6, to: latestDay) ?? latestDay
-        let twentyEightDayStart = calendar.date(byAdding: .day, value: -27, to: latestDay) ?? latestDay
-        let sevenDay = snapshot.weights.filter { $0.date >= sevenDayStart && $0.date <= latest.date }
-        let twentyEightDay = snapshot.weights.filter { $0.date >= twentyEightDayStart && $0.date <= latest.date }
-        guard !sevenDay.isEmpty, !twentyEightDay.isEmpty else { return nil }
-        let oldest = twentyEightDay.min(by: { $0.date < $1.date })
-        let change = oldest?.id == latest.id ? nil : oldest.map { latest.pounds - $0.pounds }
-        let loggedDays = Set(twentyEightDay.map { Self.dayKey(for: $0.date) }).count
-        return PublicWeightTrend(
-            asOf: Self.dayKey(for: latest.date),
-            currentPounds: latest.pounds,
-            goalPounds: snapshot.goalWeight,
-            sevenDayAverage: sevenDay.map(\.pounds).reduce(0, +) / Double(sevenDay.count),
-            change28Days: change,
-            daysLogged28: min(28, loggedDays)
+            publicStrength: publicStrength(snapshot.workouts, catalog: catalog)
         )
     }
 
@@ -476,7 +491,7 @@ final class CoachSyncService: ObservableObject, CoachSyncing {
                 var scores: [MuscleGroup: Double] = [:]
                 for logged in workout.exercises {
                     guard let exercise = catalog.exercise(id: logged.exerciseID) else { continue }
-                    let sets = Double(logged.sets.filter(\.isPerformed).count)
+                    let sets = Double(logged.sets.filter(\.isWorkingSet).count)
                     for contribution in exercise.muscles {
                         scores[contribution.muscle, default: 0] += sets * contribution.intensity
                     }
@@ -522,6 +537,18 @@ final class CoachSyncService: ObservableObject, CoachSyncing {
             && url.path == "/api/fitness/private-sync"
             && url.query == nil
             && url.fragment == nil
+    }
+
+    /// Schema 2 binds the routing metadata to the ciphertext. Someone who steals
+    /// only the website write token can no longer replay an old sealed snapshot by
+    /// replacing its timestamp or device id with fresh values.
+    static func authenticatedMetadata(
+        batchID: String,
+        deviceID: String,
+        createdAt: String,
+        keyID: String
+    ) -> Data {
+        Data("today-sync-v2\n\(batchID)\n\(createdAt)\n\(deviceID)\n\(keyID)\n".utf8)
     }
 
     private static let encoder: JSONEncoder = {

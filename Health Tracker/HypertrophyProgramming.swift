@@ -27,18 +27,84 @@ struct HypertrophyPrescription: Equatable {
     }
 }
 
-struct HypertrophyTemplateExercise: Identifiable, Equatable {
-    let exerciseID: String
-    let sets: Int
+struct NextSetTarget: Equatable {
+    let weight: Double?
+    let reps: Int
+    let note: String
+    let confidence: ProgressionConfidence
+}
+
+enum ProgressionConfidence: String, Equatable {
+    case low
+    case medium
+    case high
+
+    var label: String { "\(rawValue.capitalized) confidence" }
+}
+
+struct HypertrophyTemplateExercise: Identifiable, Codable, Hashable {
+    var exerciseID: String
+    var sets: Int
 
     var id: String { exerciseID }
 }
 
-struct HypertrophyTemplate: Identifiable, Equatable {
+struct HypertrophyTemplate: Identifiable, Codable, Hashable {
     let id: String
-    let title: String
-    let focus: String
-    let exercises: [HypertrophyTemplateExercise]
+    var title: String
+    var focus: String
+    var targetMuscles: [WorkoutMuscleArea]
+    var exercises: [HypertrophyTemplateExercise]
+
+    var kind: WorkoutKind {
+        id.hasPrefix("upper-") ? .upper : .lower
+    }
+}
+
+enum WorkoutMuscleArea: String, Codable, CaseIterable, Identifiable {
+    case chest = "Chest"
+    case lats = "Lats"
+    case midBack = "Mid back"
+    case sideDelts = "Side delts"
+    case rearDelts = "Rear delts"
+    case biceps = "Biceps"
+    case triceps = "Triceps"
+    case quads = "Quads"
+    case hamstrings = "Hamstrings"
+    case glutes = "Glutes"
+    case calves = "Calves"
+    case core = "Core"
+
+    var id: Self { self }
+
+    func isTargeted(by muscle: MuscleGroup) -> Bool {
+        switch self {
+        case .chest:
+            [.upperChest, .middleChest, .lowerChest].contains(muscle)
+        case .lats:
+            muscle == .lats
+        case .midBack:
+            [.rhomboids, .upperTraps, .middleTraps, .lowerTraps, .lowerBack].contains(muscle)
+        case .sideDelts:
+            muscle == .sideDelts
+        case .rearDelts:
+            muscle == .rearDelts
+        case .biceps:
+            [.bicepsLongHead, .bicepsShortHead, .brachialis].contains(muscle)
+        case .triceps:
+            [.tricepsLongHead, .tricepsLateralHead, .tricepsMedialHead].contains(muscle)
+        case .quads:
+            [.rectusFemoris, .vastusLateralis, .vastusMedialis].contains(muscle)
+        case .hamstrings:
+            muscle == .hamstrings
+        case .glutes:
+            [.gluteMax, .gluteMed, .adductors, .abductors].contains(muscle)
+        case .calves:
+            [.gastrocnemius, .soleus, .tibialisAnterior].contains(muscle)
+        case .core:
+            [.rectusAbdominis, .obliques].contains(muscle)
+        }
+    }
 }
 
 enum HypertrophyProgramming {
@@ -46,6 +112,7 @@ enum HypertrophyProgramming {
         id: "upper-a",
         title: "Upper A",
         focus: "Smith incline, supported T-bar, and your machine pulldown",
+        targetMuscles: [.chest, .lats, .midBack, .sideDelts, .biceps, .triceps],
         exercises: [
             .init(exerciseID: "smith-machine-incline-press", sets: 2),
             .init(exerciseID: "chest-supported-t-bar-row", sets: 2),
@@ -61,6 +128,7 @@ enum HypertrophyProgramming {
         id: "lower-a",
         title: "Lower A",
         focus: "Quad bias, capped before it compromises running",
+        targetMuscles: [.quads, .hamstrings, .glutes, .calves, .core],
         exercises: [
             .init(exerciseID: "leg-press", sets: 2),
             .init(exerciseID: "seated-leg-curl", sets: 2),
@@ -75,6 +143,7 @@ enum HypertrophyProgramming {
         id: "upper-b",
         title: "Upper B",
         focus: "Back first, pec deck chest work, and cable-biased arms",
+        targetMuscles: [.chest, .lats, .midBack, .sideDelts, .rearDelts, .biceps, .triceps],
         exercises: [
             .init(exerciseID: "lat-pulldown", sets: 2),
             .init(exerciseID: "machine-chest-fly", sets: 2),
@@ -90,6 +159,7 @@ enum HypertrophyProgramming {
         id: "lower-b",
         title: "Lower B",
         focus: "Posterior-chain bias with failure kept off hinges",
+        targetMuscles: [.quads, .hamstrings, .glutes, .calves, .core],
         exercises: [
             .init(exerciseID: "plate-loaded-squat", sets: 2),
             .init(exerciseID: "romanian-deadlift", sets: 2),
@@ -103,11 +173,18 @@ enum HypertrophyProgramming {
 
     static let templates = [upperA, lowerA, upperB, lowerB]
 
+    static func template(id: String) -> HypertrophyTemplate? {
+        templates.first { $0.id == id }
+    }
+
     static func nextTemplate(for kind: WorkoutKind, workouts: [WorkoutSession]) -> HypertrophyTemplate? {
-        let completed = workouts.filter { $0.kind == kind }.count
         switch kind {
-        case .upper: return completed.isMultiple(of: 2) ? upperA : upperB
-        case .lower: return completed.isMultiple(of: 2) ? lowerA : lowerB
+        case .upper:
+            return workouts.first(where: { $0.routineID == upperA.id || $0.routineID == upperB.id })?.routineID == upperA.id
+                ? upperB : upperA
+        case .lower:
+            return workouts.first(where: { $0.routineID == lowerA.id || $0.routineID == lowerB.id })?.routineID == lowerA.id
+                ? lowerB : lowerA
         default: return nil
         }
     }
@@ -138,7 +215,7 @@ enum HypertrophyProgramming {
         guard let history else {
             return "First tracked exposure. Choose a controlled load inside the target range."
         }
-        let sets = history.sets.filter(\.isPerformed)
+        let sets = history.sets.filter(\.isProgressionSet)
         guard !sets.isEmpty else { return "Log completed sets to unlock load guidance." }
 
         let allAtTop = sets.allSatisfy { $0.reps >= prescription.reps.upper }
@@ -151,6 +228,124 @@ enum HypertrophyProgramming {
             return "Below the rep range. Rest longer, then hold or slightly reduce the load."
         }
         return "Keep the load and add reps before adding weight."
+    }
+
+    static func nextSetTarget(
+        current: LoggedExercise,
+        history: LoggedExercise?,
+        exercise: ExerciseDefinition
+    ) -> NextSetTarget? {
+        nextSetTarget(current: current, history: history.map { [$0] } ?? [], exercise: exercise)
+    }
+
+    static func nextSetTarget(
+        current: LoggedExercise,
+        history: [LoggedExercise],
+        exercise: ExerciseDefinition
+    ) -> NextSetTarget? {
+        guard let nextIndex = current.sets.firstIndex(where: { !$0.isPerformed }) else { return nil }
+        let prescription = prescription(for: current.baseExerciseID)
+        let currentSet = current.sets[nextIndex]
+        if currentSet.setType == .backoff {
+            let priorBackoffs = history.compactMap { exposure in
+                exposure.sets.first { $0.isPerformed && $0.setType == .backoff }
+            }
+            let prior = priorBackoffs.first
+            return NextSetTarget(
+                weight: currentSet.weight ?? prior?.weight,
+                reps: currentSet.reps > 0 ? currentSet.reps : (prior?.reps ?? prescription.reps.lower),
+                note: prior == nil
+                    ? "Backoff set. Use a controlled lower load and establish a baseline."
+                    : "Backoff set. Match the prior backoff before adding reps or load.",
+                confidence: priorBackoffs.count >= 2 ? .medium : .low
+            )
+        }
+        let exposures = history.prefix(3).map { $0.sets.filter(\.isProgressionSet) }.filter { !$0.isEmpty }
+        let priorSets = exposures.first ?? []
+        let confidence: ProgressionConfidence = exposures.count >= 3 ? .high : (exposures.count == 2 ? .medium : .low)
+
+        if currentSet.setType == .warmup {
+            return NextSetTarget(
+                weight: currentSet.weight,
+                reps: currentSet.reps > 0 ? currentSet.reps : prescription.reps.lower,
+                note: "Warm-up set. Prepare the movement without turning it into fatigue.",
+                confidence: .high
+            )
+        }
+
+        guard !priorSets.isEmpty else {
+            let reps = currentSet.reps > 0 ? currentSet.reps : prescription.reps.lower
+            return NextSetTarget(
+                weight: currentSet.weight,
+                reps: reps,
+                note: "First tracked exposure. Establish a clean baseline.",
+                confidence: .low
+            )
+        }
+
+        let workingIndex = current.sets.prefix(nextIndex).filter { $0.setType.countsAsWorking }.count
+        let prior = priorSets[min(workingIndex, priorSets.count - 1)]
+        let comparable = comparableExposures(exposures)
+        let allAtTopTwice = comparable.count >= 2 && comparable.prefix(2).allSatisfy { exposure in
+            exposure.allSatisfy { $0.reps >= prescription.reps.upper }
+        }
+        if allAtTopTwice,
+           exercise.loadMode != .bodyweight,
+           let priorWeight = prior.weight {
+            return NextSetTarget(
+                weight: priorWeight + exercise.weightIncrement,
+                reps: prescription.reps.lower,
+                note: "You topped the range in two comparable sessions. Add the smallest load jump.",
+                confidence: confidence
+            )
+        }
+
+        let completedNow = current.sets.filter(\.isProgressionSet)
+        if let first = completedNow.first,
+           let last = completedNow.last,
+           completedNow.count >= 2,
+           first.reps > 0,
+           Double(last.reps) / Double(first.reps) < 0.75 {
+            return NextSetTarget(
+                weight: last.weight ?? prior.weight,
+                reps: max(prescription.reps.lower, last.reps),
+                note: "Reps dropped sharply this workout. Keep the load and take the rest you need.",
+                confidence: .high
+            )
+        }
+
+        let targetReps = min(prescription.reps.upper, max(1, prior.reps + 1))
+        let note: String
+        if prior.reps < prescription.reps.lower {
+            note = "Hold the load and work back into the target range."
+        } else if targetReps > prior.reps {
+            let totals = comparable.prefix(3).map { $0.reduce(0) { $0 + $1.reps } }
+            let context = totals.count >= 2 ? " across \(totals.count) comparable sessions" : ""
+            note = "Beat this set by one rep\(context)."
+        } else {
+            note = "Match the top of the range with cleaner execution."
+        }
+        return NextSetTarget(weight: prior.weight, reps: targetReps, note: note, confidence: confidence)
+    }
+
+    /// Exact exercise IDs already separate machine brands. This second gate keeps
+    /// mixed-load exposures from pretending to be the same progression attempt.
+    private static func comparableExposures(_ exposures: [[LoggedSet]]) -> [[LoggedSet]] {
+        guard let baseline = exposures.first,
+              let baselineLoad = representativeLoad(for: baseline) else { return exposures }
+        return exposures.filter { exposure in
+            guard let load = representativeLoad(for: exposure) else { return false }
+            return abs(load - baselineLoad) < 0.01
+        }
+    }
+
+    private static func representativeLoad(for sets: [LoggedSet]) -> Double? {
+        let loads = sets.compactMap(\.weight)
+        guard !loads.isEmpty else { return 0 }
+        let counts = Dictionary(grouping: loads, by: { $0 }).mapValues(\.count)
+        return counts.max { lhs, rhs in
+            lhs.value == rhs.value ? lhs.key < rhs.key : lhs.value < rhs.value
+        }?.key
     }
 
     private static let longLeverAndSmallMuscleExercises: Set<String> = [
@@ -205,12 +400,12 @@ struct HypertrophyPlanView: View {
 
             Section("What the evidence changes") {
                 Label("Use broad practical ranges: 6–10 on stable compounds, 8–15 on isolations, and 10–20 where heavy loading is awkward", systemImage: "arrow.left.and.right")
-                Label("Keep roughly 2–3 clean reps in reserve on squats and hinges; failure is optional on lower-risk isolation work", systemImage: "shield.lefthalf.filled")
+                Label("Your completed working sets default to failure; on squats and hinges, technical failure means stop before form breaks", systemImage: "shield.lefthalf.filled")
                 Label("Treat frequency as a way to distribute quality weekly work—not a hypertrophy multiplier", systemImage: "calendar.badge.clock")
                 Label("Adjust weekly sets gradually from multi-week performance and recovery trends", systemImage: "chart.line.uptrend.xyaxis")
             }
 
-            ForEach(HypertrophyProgramming.templates) { template in
+            ForEach(store.routines) { template in
                 Section {
                     ForEach(template.exercises) { item in
                         templateRow(item)
@@ -251,7 +446,7 @@ struct HypertrophyPlanView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(catalog.exercise(id: item.exerciseID)?.name ?? item.exerciseID)
                     .font(.subheadline.weight(.semibold))
-                Text("\(prescription.reps.label) · \(prescription.effortLabel) · \(prescription.restLabel)")
+                Text(prescription.reps.label)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -264,7 +459,7 @@ struct HypertrophyPlanView: View {
     }
 
     private func nextTemplateRow(for kind: WorkoutKind) -> some View {
-        let template = HypertrophyProgramming.nextTemplate(for: kind, workouts: store.workouts)
+        let template = store.nextRoutine(for: kind)
         return HStack {
             Label(kind.title, systemImage: kind.symbol)
             Spacer()

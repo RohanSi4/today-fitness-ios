@@ -167,9 +167,9 @@ final class ScreenshotWalkthrough: XCTestCase {
             resume.tap()
         } else {
             app.buttons["start-workout-button"].tap()
-            XCTAssertTrue(app.buttons["start-upper-workout"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.buttons["start-upper-a-workout"].waitForExistence(timeout: 5))
             shoot(app, "07-workout-start-flow")
-            app.buttons["start-upper-workout"].tap()
+            app.buttons["start-upper-a-workout"].tap()
         }
         XCTAssertTrue(app.buttons["close-workout-button"].waitForExistence(timeout: 5))
         Thread.sleep(forTimeInterval: 1)

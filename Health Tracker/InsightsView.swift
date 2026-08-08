@@ -12,6 +12,7 @@ struct InsightsView: View {
 
     @State private var showingRecap = false
     @State private var showingCoachSync = false
+    @State private var showingGoalEditor = false
 
     var body: some View {
         ScrollView {
@@ -58,12 +59,22 @@ struct InsightsView: View {
         .sheet(isPresented: $showingCoachSync) {
             CoachSyncView(service: coachSync, store: store)
         }
+        .sheet(isPresented: $showingGoalEditor) {
+            GoalWeightEditor(store: store)
+        }
     }
 
     private var weightProgress: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Label("Weight goal", systemImage: "scalemass.fill")
-                .font(.headline)
+            HStack {
+                Label("Weight goal", systemImage: "scalemass.fill")
+                    .font(.headline)
+                Spacer()
+                Button("Edit", systemImage: "pencil") { showingGoalEditor = true }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
             if let latest = store.latestWeight {
                 HStack(alignment: .firstTextBaseline) {
                     Text("\(latest.pounds.formatted(.number.precision(.fractionLength(1))))")
@@ -279,17 +290,22 @@ struct InsightsView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(records.prefix(6), id: \.exercise.id) { record in
+                ForEach(records.prefix(6)) { record in
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(record.exercise.name).font(.subheadline.weight(.semibold))
-                            Text("Best recorded set").font(.caption).foregroundStyle(.secondary)
+                            Text(record.action).font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Text(record.label)
-                            .font(.subheadline.monospacedDigit().weight(.semibold))
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(record.label)
+                                .font(.subheadline.monospacedDigit().weight(.semibold))
+                            Text(record.changeLabel)
+                                .font(.caption2.monospacedDigit().weight(.semibold))
+                                .foregroundStyle(record.change >= 0 ? .green : TodayPalette.warm)
+                        }
                     }
-                    if record.exercise.id != records.prefix(6).last?.exercise.id {
+                    if record.id != records.prefix(6).last?.id {
                         Divider()
                     }
                 }
@@ -309,30 +325,78 @@ struct InsightsView: View {
         }
     }
 
-    private var exerciseRecords: [(exercise: ExerciseDefinition, label: String, estimate: Double)] {
-        var records: [String: (exercise: ExerciseDefinition, label: String, estimate: Double)] = [:]
+    private struct ExerciseTrend: Identifiable {
+        let exercise: ExerciseDefinition
+        let label: String
+        let estimate: Double
+        let change: Double
+        let changeLabel: String
+        let action: String
+        let trainedAt: Date
+
+        var id: String { exercise.id }
+    }
+
+    private var exerciseRecords: [ExerciseTrend] {
+        var performances: [String: [(date: Date, label: String, estimate: Double)]] = [:]
+        var definitions: [String: ExerciseDefinition] = [:]
         var latestTrainingDates: [String: Date] = [:]
         for workout in store.workouts {
             for logged in workout.exercises {
                 guard let exercise = catalog.exercise(id: logged.exerciseID) else { continue }
-                for set in logged.sets where set.isPerformed {
+                definitions[exercise.id] = exercise
+                let working = logged.sets.filter(\.isProgressionSet)
+                guard !working.isEmpty else { continue }
+                var bestLabel = ""
+                var bestEstimate = -Double.infinity
+                for set in logged.sets where set.isProgressionSet {
                     latestTrainingDates[exercise.id] = max(
                         latestTrainingDates[exercise.id] ?? .distantPast,
                         workout.startedAt
                     )
                     let weight = set.weight ?? 0
                     let estimate = weight > 0 ? weight * (1 + Double(set.reps) / 30) : Double(set.reps)
-                    guard estimate > (records[exercise.id]?.estimate ?? -1) else { continue }
                     let label = weight > 0
                         ? "\(weight.formatted(.number.precision(.fractionLength(0...1)))) × \(set.reps)"
                         : "\(set.reps) reps"
-                    records[exercise.id] = (exercise, label, estimate)
+                    if estimate > bestEstimate {
+                        bestEstimate = estimate
+                        bestLabel = label
+                    }
                 }
+                performances[exercise.id, default: []].append((workout.startedAt, bestLabel, bestEstimate))
             }
         }
-        return records.values.sorted {
-            (latestTrainingDates[$0.exercise.id] ?? .distantPast) >
-                (latestTrainingDates[$1.exercise.id] ?? .distantPast)
+        return performances.compactMap { id, values -> ExerciseTrend? in
+            guard let exercise = definitions[id],
+                  let latest = values.sorted(by: { $0.date > $1.date }).first else { return nil }
+            let ordered = values.sorted { $0.date > $1.date }
+            let previous = ordered.dropFirst().first
+            let change = previous.map { latest.estimate / max(0.01, $0.estimate) - 1 } ?? 0
+            let changeLabel = previous == nil
+                ? "baseline"
+                : change.formatted(.percent.precision(.fractionLength(0)).sign(strategy: .always()))
+            let action: String
+            if previous == nil {
+                action = "Build two more comparable sessions for a confident trend"
+            } else if change <= -0.05 {
+                action = "Hold load and watch rest, sleep, and the next exposure"
+            } else if change >= 0.03 {
+                action = "Progressing; keep the current rep-then-load plan"
+            } else {
+                action = "Stable; aim for one more clean rep before adding load"
+            }
+            return ExerciseTrend(
+                exercise: exercise,
+                label: latest.label,
+                estimate: latest.estimate,
+                change: change,
+                changeLabel: changeLabel,
+                action: action,
+                trainedAt: latest.date
+            )
+        }.sorted {
+            $0.trainedAt > $1.trainedAt
         }
     }
 
@@ -385,5 +449,57 @@ struct InsightsView: View {
             Text(value).font(.subheadline.monospacedDigit().weight(.semibold))
         }
         .font(.subheadline)
+    }
+}
+
+private struct GoalWeightEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: TodayStore
+    @State private var value: Double
+
+    init(store: TodayStore) {
+        self.store = store
+        _value = State(initialValue: store.goalWeight)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Goal") {
+                    TextField(
+                        "Goal weight",
+                        value: $value,
+                        format: .number.precision(.fractionLength(0...1))
+                    )
+                    .keyboardType(.decimalPad)
+                    LabeledContent("Unit", value: "lb")
+                }
+                Section {
+                    Text("This moves the private goal line and gap calculation. It does not change your training prescription by itself.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Weight goal")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        store.updateGoalWeight(value)
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                    .disabled(value < 50 || value > 500)
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { dismissKeyboard() }
+                }
+            }
+        }
+        .presentationDetents([.medium])
     }
 }
