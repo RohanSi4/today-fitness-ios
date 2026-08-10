@@ -18,7 +18,8 @@ struct TodayWidgetWeek: Codable, Equatable {
 
 struct TodayWidgetSnapshot: Codable, Equatable {
     static let appGroupIdentifier = "group.rohansingh.today"
-    static let defaultsKey = "today-widget-snapshot-v1"
+    static let defaultsKey = "today-widget-snapshot-v2"
+    static let legacyDefaultsKey = "today-widget-snapshot-v1"
     static let widgetKind = "TodayDailyWidget"
 
     let generatedAt: Date
@@ -80,8 +81,22 @@ struct TodayWidgetSnapshot: Codable, Equatable {
     }
 
     static func load(now: Date = .now, calendar: Calendar = .current) -> TodayWidgetSnapshot? {
-        guard let defaults = UserDefaults(suiteName: appGroupIdentifier),
-              let data = defaults.data(forKey: defaultsKey),
+        guard let defaults = UserDefaults(suiteName: appGroupIdentifier) else {
+            return nil
+        }
+        return load(from: defaults, now: now, calendar: calendar)
+    }
+
+    static func load(
+        from defaults: UserDefaults,
+        now: Date = .now,
+        calendar: Calendar = .current
+    ) -> TodayWidgetSnapshot? {
+        // Version 1 allowed exact daily plan/completion copy. Never render it
+        // after an upgrade, even if the host app has not launched to publish v2.
+        defaults.removeObject(forKey: legacyDefaultsKey)
+
+        guard let data = defaults.data(forKey: defaultsKey),
               let snapshot = try? JSONDecoder().decode(TodayWidgetSnapshot.self, from: data) else {
             return nil
         }

@@ -178,4 +178,53 @@ struct WidgetStalenessTests {
         #expect(decoded.weekStartKey == nil)
         #expect(decoded.week.completedMiles == 21)
     }
+
+    @Test func anUnsafeVersionOnePayloadIsDeletedInsteadOfRenderedAfterUpgrade() throws {
+        let suiteName = "TodayWidgetMigrationTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let calendar = calendar()
+        var unsafe = snapshot(
+            on: date(2026, 7, 29),
+            weekStart: planWeek.start,
+            weekEnd: planWeek.end,
+            calendar: calendar
+        )
+        unsafe = TodayWidgetSnapshot(
+            generatedAt: unsafe.generatedAt,
+            dateKey: unsafe.dateKey,
+            phase: unsafe.phase,
+            headline: "5 mi run + Lower lift",
+            detail: "Done: 5 mi in 40m · 1 set",
+            symbolName: unsafe.symbolName,
+            deepLink: unsafe.deepLink,
+            week: unsafe.week,
+            weekStartKey: unsafe.weekStartKey,
+            weekEndKey: unsafe.weekEndKey
+        )
+        defaults.set(try JSONEncoder().encode(unsafe), forKey: TodayWidgetSnapshot.legacyDefaultsKey)
+
+        let loaded = TodayWidgetSnapshot.load(from: defaults, now: unsafe.generatedAt, calendar: calendar)
+
+        #expect(loaded == nil)
+        #expect(defaults.data(forKey: TodayWidgetSnapshot.legacyDefaultsKey) == nil)
+    }
+
+    @Test func aCurrentVersionPayloadStillLoadsNormally() throws {
+        let suiteName = "TodayWidgetCurrentPayloadTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let calendar = calendar()
+        let stored = snapshot(
+            on: date(2026, 7, 29),
+            weekStart: planWeek.start,
+            weekEnd: planWeek.end,
+            calendar: calendar
+        )
+        defaults.set(try JSONEncoder().encode(stored), forKey: TodayWidgetSnapshot.defaultsKey)
+
+        let loaded = TodayWidgetSnapshot.load(from: defaults, now: stored.generatedAt, calendar: calendar)
+
+        #expect(loaded == stored)
+    }
 }

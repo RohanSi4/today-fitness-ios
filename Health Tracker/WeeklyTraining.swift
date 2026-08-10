@@ -272,6 +272,7 @@ enum TodayWidgetPublisher {
 
         guard let defaults = UserDefaults(suiteName: TodayWidgetSnapshot.appGroupIdentifier),
               let data = try? JSONEncoder().encode(snapshot) else { return }
+        defaults.removeObject(forKey: TodayWidgetSnapshot.legacyDefaultsKey)
         defaults.set(data, forKey: TodayWidgetSnapshot.defaultsKey)
         WidgetCenter.shared.reloadTimelines(ofKind: TodayWidgetSnapshot.widgetKind)
     }
