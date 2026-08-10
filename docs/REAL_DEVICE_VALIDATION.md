@@ -9,29 +9,32 @@ This is the release gate for those paths. A blank row means **not verified**.
 | Field | Value |
 | --- | --- |
 | Date | 2026-08-09 |
-| Commit | `4dc05d5` plus the uncommitted checklist/README audit changes |
-| Tester | Codex preflight; hands-on device checks require Rohan |
-| iPhone model / iOS | iPhone 17 Pro Max; CoreDevice reported **unavailable** |
+| Commit | `9b518b1` plus the installer fix being recorded with this run |
+| Tester | Codex automation; hands-on checks require Rohan |
+| iPhone model / iOS | iPhone 17 Pro Max / iOS 26.5.2; paired over USB |
 | Apple Watch model / watchOS | Apple Watch Ultra 2; paired and available; OS version not reported |
-| Signing team | |
+| Signing team | `46Q2G4XNBY` / automatic Apple Development signing |
 | Coach endpoint environment | production allowlisted endpoint |
 
-Execution attempt: **BLOCKED AT PREFLIGHT**. `xcrun devicectl list devices`
-found the paired Watch but reported the iPhone unavailable. No signed install or
-device mutation was attempted, and D01-D15 remain unverified. Retry this record
-when the iPhone is connected, unlocked, and trusted.
+Execution resumed after the iPhone connected over USB. The installer initially
+rejected CoreDevice's valid `connected` state because it accepted only
+`available`; the device parser was fixed and shell-validated. A signed debug
+build then installed over the existing Today app and launched successfully. A
+second launch with `--terminate-existing` also succeeded. The app was not
+uninstalled because doing so would erase local state, so this is an upgrade-path
+check, not the fresh-install proof required by D01.
 
 Do not paste body weight, tokens, encryption keys, pairing codes, precise workout
 routes, or screenshots containing those values into this file.
 
 ## Preconditions
 
-- [ ] Working tree and commit under test recorded above.
-- [ ] iPhone is unlocked, trusted, and paired to the intended Apple Watch.
+- [x] Working tree and commit under test recorded above.
+- [x] iPhone is unlocked, trusted, and paired to the intended Apple Watch.
 - [ ] Health contains a known recent run and sleep sample that are safe to inspect.
 - [ ] Coach transport secrets are configured at the allowlisted production endpoint.
 - [ ] Current coach has published a seven-day plan.
-- [ ] Today is installed from this checkout with `./tools/install-on-phone.sh`.
+- [x] Today is installed from this checkout with `./tools/install-on-phone.sh`.
 - [ ] Today widget is installed on the Lock Screen or Home Screen.
 
 ## Required evidence
@@ -41,7 +44,7 @@ not acceptable for a release-gating row.
 
 | ID | Path | Check | Status | Evidence / defect |
 | --- | --- | --- | --- | --- |
-| D01 | Signed install | App launches as **Today** after a fresh signed install and again after force-quit. | | |
+| D01 | Signed install | App launches as **Today** after a fresh signed install and again after force-quit. | | Signed upgrade install, launch, forced termination, and relaunch passed. Fresh uninstall/reinstall not run because it would erase local state. |
 | D02 | Health authorization | First launch requests only the expected Health read/write permissions; denial leaves the app usable. | | |
 | D03 | Health reads | Insights shows the known run, sleep, and movement data without sample-data labels. | | |
 | D04 | Body-mass write | Enter a distinctive test weight, verify one matching Apple Health sample, then correct it and verify replacement behavior. | | |

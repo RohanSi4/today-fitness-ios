@@ -10,7 +10,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 DEVICE=$(xcrun devicectl list devices 2>/dev/null \
-  | awk -F'  +' '/iPhone/ && /available/ && !/unavailable/ {print $3; exit}')
+  | awk -F'  +' '/iPhone/ && (/available/ || /connected/) && !/unavailable/ {print $3; exit}')
 
 if [ -z "$DEVICE" ]; then
   echo "No iPhone available." >&2
