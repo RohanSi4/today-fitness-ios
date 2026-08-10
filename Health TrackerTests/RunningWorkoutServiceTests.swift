@@ -104,7 +104,6 @@ struct RunningWorkoutServiceTests {
 
 private struct StubError: Error {}
 
-@MainActor
 private final class StubRunProvider: RunningWorkoutProviding, @unchecked Sendable {
     var result: Result<[RunningWorkoutSummary], Error>
     var isHealthDataAvailable = true

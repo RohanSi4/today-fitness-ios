@@ -294,17 +294,17 @@ struct CoachSyncReliabilityTests {
     @Test func aSecondChangeDuringAnUploadIsQueuedRatherThanDropped() async throws {
         let service = try makeService()
         let catalog = ExerciseCatalog(cacheURL: temporaryURL("queued-catalog"))
-        let started = DispatchSemaphore(value: 0)
+        let (started, startedContinuation) = AsyncStream.makeStream(of: Void.self)
         let release = DispatchSemaphore(value: 0)
         syncStub.reset()
         // Timeouts everywhere so a regression fails the test instead of wedging CI.
         syncStub.setGate {
-            started.signal()
+            startedContinuation.yield()
             _ = release.wait(timeout: .now() + 20)
         }
 
         async let inFlight: Void = service.sync(snapshot: StoredTodayData(), catalog: catalog)
-        #expect(await Task.detached { started.wait(timeout: .now() + 20) }.value == .success)
+        #expect(await signalArrives(on: started))
 
         // Arrives while the first batch is on the wire. It used to be discarded, and
         // the finishing upload then cleared the pending flag on its behalf.
@@ -320,17 +320,17 @@ struct CoachSyncReliabilityTests {
     @Test func aChangeMadeMidUploadIsNotReportedAsSynced() async throws {
         let service = try makeService()
         let catalog = ExerciseCatalog(cacheURL: temporaryURL("pending-catalog"))
-        let started = DispatchSemaphore(value: 0)
+        let (started, startedContinuation) = AsyncStream.makeStream(of: Void.self)
         let release = DispatchSemaphore(value: 0)
         syncStub.reset()
         // Timeouts everywhere so a regression fails the test instead of wedging CI.
         syncStub.setGate {
-            started.signal()
+            startedContinuation.yield()
             _ = release.wait(timeout: .now() + 20)
         }
 
         async let inFlight: Void = service.sync(snapshot: StoredTodayData(), catalog: catalog)
-        #expect(await Task.detached { started.wait(timeout: .now() + 20) }.value == .success)
+        #expect(await signalArrives(on: started))
         service.markPending()
         syncStub.setGate(nil)
         release.signal()
@@ -600,6 +600,26 @@ final class SyncStubProtocol: URLProtocol {
     }
 }
 
+private func signalArrives(
+    on stream: AsyncStream<Void>,
+    timeout: Duration = .seconds(20)
+) async -> Bool {
+    await withTaskGroup(of: Bool.self) { group in
+        group.addTask {
+            var iterator = stream.makeAsyncIterator()
+            return await iterator.next() != nil
+        }
+        group.addTask {
+            try? await Task.sleep(for: timeout)
+            return false
+        }
+
+        let result = await group.next() ?? false
+        group.cancelAll()
+        return result
+    }
+}
+
 /// Keeps the pairing secret in memory instead of the system keychain.
 ///
 /// These four tests failed only on CI for a week. CI builds with
@@ -628,7 +648,7 @@ final class RefusingSecretStore: CoachSyncSecretStore {
     func delete(_ account: String) {}
 }
 
-nonisolated(unsafe) let syncStub = SyncStubState()
+let syncStub = SyncStubState()
 
 final class SyncStubState: @unchecked Sendable {
     private let lock = NSLock()

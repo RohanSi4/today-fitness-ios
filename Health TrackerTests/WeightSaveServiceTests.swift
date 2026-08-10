@@ -277,8 +277,7 @@ private final class StubHealthStore: BodyWeightHealthStoring, BodyWeightHealthDe
     }
 }
 
-@MainActor
-private final class StubReminders: WeightReminderScheduling {
+private final class StubReminders: WeightReminderScheduling, @unchecked Sendable {
     private(set) var cancelledDates: [Date] = []
     private(set) var scheduledDayCounts: [Int] = []
 

@@ -145,7 +145,7 @@ struct DailyRecapViewModelTests {
     }
 }
 
-private final class StubHealthData: HealthDataProviding {
+private final class StubHealthData: HealthDataProviding, @unchecked Sendable {
     let isHealthDataAvailable: Bool
     private(set) var authorizationRequests = 0
 
