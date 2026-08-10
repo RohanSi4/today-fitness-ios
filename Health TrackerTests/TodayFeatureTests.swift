@@ -598,16 +598,19 @@ struct WeeklyTrainingSnapshotTests {
         )
         let encoded = try JSONEncoder().encode(snapshot)
         let json = try #require(String(data: encoded, encoding: .utf8))
+        let normalized = json.lowercased()
 
         #expect(!json.contains("184.4"))
-        #expect(!json.contains("machine-chest-fly"))
-        #expect(!json.contains("leg-extension"))
-        #expect(!json.contains("exercise"))
-        #expect(!json.contains("pounds"))
-        #expect(!json.contains("Lower"))
-        #expect(!json.contains("10 reps"))
-        #expect(!json.contains("1 set"))
-        #expect(!json.contains("5 mi in 40m"))
+        #expect(!normalized.contains("machine-chest-fly"))
+        #expect(!normalized.contains("leg-extension"))
+        #expect(!normalized.contains("leg extension"))
+        #expect(!normalized.contains("exercise"))
+        #expect(!normalized.contains("pounds"))
+        #expect(!normalized.contains("lower body lift"))
+        #expect(!normalized.contains("5 mile run"))
+        #expect(!normalized.contains("10 reps"))
+        #expect(!normalized.contains("1 set"))
+        #expect(!normalized.contains("5 mi in 40m"))
     }
 
     @Test func theTimeTrialDayCountsAsDoneOnceTheHardEffortIsRun() throws {
