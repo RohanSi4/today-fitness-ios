@@ -31,12 +31,13 @@ medium and large layouts, and adds Weight, Plan, and Workout deep-link actions.
 Commit `7c07626` also retires and deletes the unsafe v1 App Group payload so an
 upgraded widget cannot render cached private copy before the host app launches.
 The code-level regression tests, simulator widget build, and signed-device build
-pass. The exact build installed on iOS 26.6, but iOS refused automated launch
-until the Apple Development profile is explicitly trusted after the OS update;
-hands-on launch and widget refresh checks are still required before D09 can be
-retested. A read-only CoreDevice inspection after installation found the App
-Group preferences reduced to a 42-byte keyless plist, proving the installed
-extension deleted the unsafe v1 cache without printing any stored values.
+pass. The exact build installed on iOS 26.6. The OS update reset Apple
+Development trust and verification initially stalled until the phone could reach
+Apple's PPQ service; after verification, automated launch and forced relaunch
+both passed. CoreDevice showed both Today and TodayWidget alive. Read-only App
+Group inspection first found a 42-byte keyless plist, proving v1 was deleted,
+then found only the `today-widget-snapshot-v2` key after host-app publication.
+No stored value was printed. On-screen widget and action checks remain hands-on.
 
 Do not paste body weight, tokens, encryption keys, pairing codes, precise workout
 routes, or screenshots containing those values into this file.
@@ -58,7 +59,7 @@ not acceptable for a release-gating row.
 
 | ID | Path | Check | Status | Evidence / defect |
 | --- | --- | --- | --- | --- |
-| D01 | Signed install | App launches as **Today** after a fresh signed install and again after force-quit. | | Earlier signed upgrade install, launch, forced termination, and relaunch passed; Rohan confirmed the app opened normally. Exact `7c07626` upgrade install passed on iOS 26.6, but launch was denied until the development profile is explicitly trusted. Fresh uninstall/reinstall was not run because it would erase local state. |
+| D01 | Signed install | App launches as **Today** after a fresh signed install and again after force-quit. | | Exact `7c07626` upgrade install, launch, forced termination, and relaunch passed on iOS 26.6 after online developer verification. Fresh uninstall/reinstall was not run because it would erase local state. |
 | D02 | Health authorization | First launch requests only the expected Health read/write permissions; denial leaves the app usable. | | |
 | D03 | Health reads | Insights shows the known run, sleep, and movement data without sample-data labels. | PASS | Rohan answered yes after checking Insights with recent real run and sleep data. |
 | D04 | Body-mass write | Enter a distinctive test weight, verify one matching Apple Health sample, then correct it and verify replacement behavior. | | |
@@ -66,13 +67,13 @@ not acceptable for a release-gating row.
 | D06 | Private sync | Log a test lift and weight, sync, and confirm the coach decrypts the private snapshot. | | |
 | D07 | Public boundary | Confirm the public fitness page shows only split, duration, working sets, and broad muscles; no exact weight, exercise detail, token, or route appears. | | |
 | D08 | Offline retry | Disable connectivity, save a change, confirm pending state, restore connectivity, and confirm one successful retry without duplicate data. | | |
-| D09 | Widget/App Group | After weight, lift, and plan changes, confirm the installed widget refreshes; weekly totals may appear, but exact weight, exercise detail, token, and route must not. | FAIL | Earlier installed widget showed exercise/workout detail. The migration-safe `7c07626` build is installed; direct App Group inspection confirmed the unsafe v1 payload was deleted and no snapshot key remained. Trust-gated launch, refresh after real changes, and on-screen observation remain before retest. |
+| D09 | Widget/App Group | After weight, lift, and plan changes, confirm the installed widget refreshes; weekly totals may appear, but exact weight, exercise detail, token, and route must not. | FAIL | Earlier installed widget showed exercise/workout detail. On `7c07626`, physical App Group inspection proved v1 was deleted and only v2 existed after launch; both app and extension processes were alive. All three widget deep-link URLs launched successfully on-device. On-screen privacy, real-change refresh, and medium/large layout/action observation remain before retest can pass. |
 | D10 | Notifications | With permission granted, confirm the scheduled 8:30 AM and noon behavior; with permission denied, confirm no misleading enabled state. | | |
 | D11 | Wake-aware reminder | After a completed Health sleep session, confirm the reminder reschedules as documented. | | |
 | D12 | WorkoutKit | Send today’s run to Apple Watch, confirm distance/location, and repeat to prove duplicate-safe replacement. | | |
 | D13 | Watch completion | Complete or use a safe short test run on Watch; confirm HealthKit ingestion updates Today and the widget without creating a second workout. | | |
 | D14 | Protected persistence | Start a lift, lock the phone, unlock, force-quit, and confirm the active session and last-good recovery remain intact. | | |
-| D15 | App Shortcuts | From Shortcuts or Spotlight, open weight, plan, and workout picker intents and verify the intended destinations. | | Rohan answered “probably”; the three destinations were not individually observed, so this remains unverified. |
+| D15 | App Shortcuts | From Shortcuts or Spotlight, open weight, plan, and workout picker intents and verify the intended destinations. | | Direct physical delivery of `today://weight`, `today://`, and `today://workout` each launched the app successfully. That proves URL plumbing, not invocation from Shortcuts/Spotlight or the visible destination, so this remains unverified. |
 
 ## Exit criteria
 
