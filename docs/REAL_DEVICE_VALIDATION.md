@@ -34,7 +34,9 @@ The code-level regression tests, simulator widget build, and signed-device build
 pass. The exact build installed on iOS 26.6, but iOS refused automated launch
 until the Apple Development profile is explicitly trusted after the OS update;
 hands-on launch and widget refresh checks are still required before D09 can be
-retested.
+retested. A read-only CoreDevice inspection after installation found the App
+Group preferences reduced to a 42-byte keyless plist, proving the installed
+extension deleted the unsafe v1 cache without printing any stored values.
 
 Do not paste body weight, tokens, encryption keys, pairing codes, precise workout
 routes, or screenshots containing those values into this file.
@@ -64,7 +66,7 @@ not acceptable for a release-gating row.
 | D06 | Private sync | Log a test lift and weight, sync, and confirm the coach decrypts the private snapshot. | | |
 | D07 | Public boundary | Confirm the public fitness page shows only split, duration, working sets, and broad muscles; no exact weight, exercise detail, token, or route appears. | | |
 | D08 | Offline retry | Disable connectivity, save a change, confirm pending state, restore connectivity, and confirm one successful retry without duplicate data. | | |
-| D09 | Widget/App Group | After weight, lift, and plan changes, confirm the installed widget refreshes; weekly totals may appear, but exact weight, exercise detail, token, and route must not. | FAIL | Earlier installed widget showed exercise/workout detail. The migration-safe `7c07626` build is installed and deletes the unsafe v1 payload, but trust-gated launch, refresh, and on-screen observation remain before retest. |
+| D09 | Widget/App Group | After weight, lift, and plan changes, confirm the installed widget refreshes; weekly totals may appear, but exact weight, exercise detail, token, and route must not. | FAIL | Earlier installed widget showed exercise/workout detail. The migration-safe `7c07626` build is installed; direct App Group inspection confirmed the unsafe v1 payload was deleted and no snapshot key remained. Trust-gated launch, refresh after real changes, and on-screen observation remain before retest. |
 | D10 | Notifications | With permission granted, confirm the scheduled 8:30 AM and noon behavior; with permission denied, confirm no misleading enabled state. | | |
 | D11 | Wake-aware reminder | After a completed Health sleep session, confirm the reminder reschedules as documented. | | |
 | D12 | WorkoutKit | Send today’s run to Apple Watch, confirm distance/location, and repeat to prove duplicate-safe replacement. | | |
