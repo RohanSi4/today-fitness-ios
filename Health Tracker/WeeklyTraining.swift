@@ -45,9 +45,18 @@ final class RunningWorkoutService: ObservableObject {
 
     init(healthStore: any RunningWorkoutProviding = HealthKitManager.shared) {
         self.healthStore = healthStore
+#if DEBUG
+        if PostRunReviewFixture.isEnabled {
+            workouts = [PostRunReviewFixture.run()]
+            lastUpdated = .now
+        }
+#endif
     }
 
     func start() async {
+#if DEBUG
+        if PostRunReviewFixture.isEnabled { return }
+#endif
         if ProcessInfo.processInfo.arguments.contains("-useMockData") { return }
         guard healthStore.isHealthDataAvailable else { return }
 
@@ -68,6 +77,9 @@ final class RunningWorkoutService: ObservableObject {
     }
 
     func refresh() async {
+#if DEBUG
+        if PostRunReviewFixture.isEnabled { return }
+#endif
         guard healthStore.isHealthDataAvailable else { return }
         let calendar = Calendar.current
         let startOfToday = calendar.startOfDay(for: .now)

@@ -19,6 +19,13 @@ final class TrainingPlanService: ObservableObject {
         self.session = session
         let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
         self.cacheURL = cacheURL ?? base.appendingPathComponent("today-plan.json")
+#if DEBUG
+        if PostRunReviewFixture.isEnabled {
+            plan = PostRunReviewFixture.plan()
+            lastUpdated = .now
+            return
+        }
+#endif
         loadCache()
     }
 
@@ -29,6 +36,9 @@ final class TrainingPlanService: ObservableObject {
     }
 
     func refresh() async {
+#if DEBUG
+        if PostRunReviewFixture.isEnabled { return }
+#endif
         if isLoading { return }
         isLoading = true
         defer { isLoading = false }
