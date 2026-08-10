@@ -73,6 +73,7 @@ struct ContentView: View {
         }
         .onChange(of: store.weights) { _, _ in publishWidgetSnapshot() }
         .onChange(of: store.workouts) { _, _ in publishWidgetSnapshot() }
+        .onChange(of: store.activeWorkout) { _, _ in syncLiveActivity() }
         .onChange(of: planService.plan) { _, _ in publishWidgetSnapshot() }
         .onChange(of: runService.workouts) { _, _ in publishWidgetSnapshot() }
         .onOpenURL { url in
@@ -127,6 +128,17 @@ struct ContentView: View {
             plan: planService.plan,
             runs: runService.workouts
         )
+    }
+
+    private func syncLiveActivity() {
+        guard let state = TodayLiveActivityStateBuilder.make(
+            store: store,
+            plan: planService.plan,
+            runs: runService.workouts
+        ) else { return }
+        Task {
+            await TodayLiveActivityManager.shared.updateIfPresented(with: state)
+        }
     }
 }
 

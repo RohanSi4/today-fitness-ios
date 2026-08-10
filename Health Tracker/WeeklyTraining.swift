@@ -286,19 +286,31 @@ enum TodayWidgetPublisher {
         now: Date = .now,
         calendar: Calendar = .current
     ) {
-        guard let snapshot = makeSnapshot(
+        guard let publication = makePublication(
             store: store,
             plan: plan,
             runs: runs,
             now: now,
             calendar: calendar
         ) else { return }
+        let snapshot = publication.snapshot
 
         guard let defaults = UserDefaults(suiteName: TodayWidgetSnapshot.appGroupIdentifier),
               let data = try? JSONEncoder().encode(snapshot) else { return }
         defaults.removeObject(forKey: TodayWidgetSnapshot.legacyDefaultsKey)
         defaults.set(data, forKey: TodayWidgetSnapshot.defaultsKey)
         WidgetCenter.shared.reloadTimelines(ofKind: TodayWidgetSnapshot.widgetKind)
+
+        let liveState = TodayLiveActivityStateBuilder.make(
+            snapshot: snapshot,
+            day: publication.day,
+            week: publication.week,
+            activeWorkout: store.activeWorkout,
+            now: now
+        )
+        Task {
+            await TodayLiveActivityManager.shared.updateIfPresented(with: liveState)
+        }
     }
 
     /// Nil when the store could not read its file. A background launch on a locked
@@ -313,6 +325,22 @@ enum TodayWidgetPublisher {
         now: Date = .now,
         calendar: Calendar = .current
     ) -> TodayWidgetSnapshot? {
+        makePublication(
+            store: store,
+            plan: plan,
+            runs: runs,
+            now: now,
+            calendar: calendar
+        )?.snapshot
+    }
+
+    private static func makePublication(
+        store: TodayStore,
+        plan: TrainingPlan?,
+        runs: [RunningWorkoutSummary],
+        now: Date,
+        calendar: Calendar
+    ) -> (snapshot: TodayWidgetSnapshot, day: WeeklyDaySnapshot?, week: WeeklyTrainingSnapshot)? {
         guard store.hasReliableData else { return nil }
         let week = WeeklyTrainingBuilder.build(
             plan: plan,
@@ -321,13 +349,15 @@ enum TodayWidgetPublisher {
             now: now,
             calendar: calendar
         )
-        return makeSnapshot(
+        let day = week.day(for: now, calendar: calendar)
+        let snapshot = makeSnapshot(
             weightLogged: store.weights.contains { calendar.isDate($0.date, inSameDayAs: now) },
-            day: week.day(for: now, calendar: calendar),
+            day: day,
             week: week,
             now: now,
             calendar: calendar
         )
+        return (snapshot, day, week)
     }
 
     static func makeSnapshot(

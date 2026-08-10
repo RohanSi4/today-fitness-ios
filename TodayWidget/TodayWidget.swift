@@ -1,3 +1,4 @@
+import ActivityKit
 import SwiftUI
 import WidgetKit
 
@@ -50,14 +51,17 @@ private struct TodayWidgetEntryView: View {
             switch family {
             case .accessoryInline:
                 Label(entry.snapshot.headline, systemImage: entry.snapshot.symbolName)
+            case .accessoryCircular:
+                Gauge(value: weeklyRatio) {
+                    Image(systemName: entry.snapshot.symbolName)
+                } currentValueLabel: {
+                    Image(systemName: entry.snapshot.symbolName)
+                }
+                .gaugeStyle(.accessoryCircularCapacity)
             case .accessoryRectangular:
                 rectangular
-            case .systemMedium:
-                medium
-            case .systemLarge:
-                large
             default:
-                small
+                rectangular
             }
         }
         .widgetURL(entry.snapshot.deepLink)
@@ -65,168 +69,29 @@ private struct TodayWidgetEntryView: View {
     }
 
     private var rectangular: some View {
-        HStack(spacing: 9) {
-            Image(systemName: entry.snapshot.symbolName)
-                .font(.title3.weight(.semibold))
-                .frame(width: 24)
-            VStack(alignment: .leading, spacing: 1) {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 7) {
+                Image(systemName: entry.snapshot.symbolName)
+                    .font(.headline.weight(.semibold))
                 Text(entry.snapshot.headline)
                     .font(.headline)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                Text(entry.snapshot.detail)
-                    .font(.caption)
+                    .minimumScaleFactor(0.75)
+                Spacer(minLength: 5)
+                Text(weeklyMileage)
+                    .font(.caption2.monospacedDigit().weight(.semibold))
                     .lineLimit(1)
-                    .foregroundStyle(.secondary)
                     .privacySensitive()
             }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var small: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Image(systemName: entry.snapshot.symbolName)
-                .font(.title2.weight(.semibold))
-                .foregroundStyle(.green)
-            Spacer(minLength: 0)
-            Text(entry.snapshot.headline)
-                .font(.headline)
-                .lineLimit(2)
-                .minimumScaleFactor(0.8)
             Text(entry.snapshot.detail)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .lineLimit(2)
-                .privacySensitive()
-            Divider()
-            Text(weeklyLine)
-                .font(.caption2.monospacedDigit().weight(.semibold))
-                .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .privacySensitive()
-        }
-    }
-
-    private var medium: some View {
-        HStack(spacing: 16) {
-            statusPanel
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 12) {
-                weeklyProgress
-                quickActions(compact: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private var large: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            statusPanel
-
-            weeklyProgress
-                .padding(14)
-                .background(.fill.quaternary, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Quick open")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .textCase(.uppercase)
-                quickActions(compact: false)
-            }
-
-            Spacer(minLength: 0)
-
-            Label("Private details stay inside Today", systemImage: "lock.fill")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private var statusPanel: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: entry.snapshot.symbolName)
-                .font(.title2.weight(.semibold))
-                .foregroundStyle(accent)
-                .frame(width: 42, height: 42)
-                .background(accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Today")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .textCase(.uppercase)
-                Text(entry.snapshot.headline)
-                    .font(.title3.weight(.bold))
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.8)
-                Text(entry.snapshot.detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .privacySensitive()
-            }
-        }
-    }
-
-    private var weeklyProgress: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("This week")
-                    .font(.subheadline.weight(.semibold))
-                Spacer(minLength: 8)
-                Text(weeklyMileage)
-                    .font(.caption.monospacedDigit().weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .privacySensitive()
-            }
-
             ProgressView(value: weeklyRatio)
-                .tint(accent)
                 .privacySensitive()
-
-            HStack(spacing: 14) {
-                Label("\(entry.snapshot.week.completedRuns) runs", systemImage: "figure.run")
-                Label("\(entry.snapshot.week.completedLifts) lifts", systemImage: "dumbbell.fill")
-            }
-            .font(.caption2.weight(.medium))
-            .foregroundStyle(.secondary)
-            .privacySensitive()
         }
-    }
-
-    private func quickActions(compact: Bool) -> some View {
-        HStack(spacing: 8) {
-            WidgetQuickAction(
-                title: compact ? nil : "Weight",
-                symbol: "scalemass.fill",
-                destination: URL(string: "today://weight")!
-            )
-            WidgetQuickAction(
-                title: compact ? nil : "Plan",
-                symbol: "calendar",
-                destination: URL(string: "today://")!
-            )
-            WidgetQuickAction(
-                title: compact ? nil : "Workout",
-                symbol: "dumbbell.fill",
-                destination: URL(string: "today://workout")!
-            )
-        }
-    }
-
-    private var accent: Color {
-        switch entry.snapshot.phase {
-        case .weight: .orange
-        case .plan, .remaining: .green
-        case .done: .mint
-        case .recovery: .indigo
-        case .unavailable: .secondary
-        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var weeklyRatio: Double {
@@ -243,46 +108,6 @@ private struct TodayWidgetEntryView: View {
         )
         return "\(completed) / \(planned) mi"
     }
-
-    private var weeklyLine: String {
-        "Week: \(weeklyMileage) · \(entry.snapshot.week.completedLifts) lifts"
-    }
-}
-
-private struct WidgetQuickAction: View {
-    let title: String?
-    let symbol: String
-    let destination: URL
-
-    var body: some View {
-        Link(destination: destination) {
-            if let title {
-                VStack(spacing: 5) {
-                    Image(systemName: symbol)
-                        .font(.headline)
-                    Text(title)
-                        .font(.caption2.weight(.semibold))
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-            } else {
-                Image(systemName: symbol)
-                    .font(.headline)
-                    .frame(maxWidth: .infinity, minHeight: 32)
-            }
-        }
-        .buttonStyle(.plain)
-        .background(.fill.quaternary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .accessibilityLabel(title ?? accessibilityTitle)
-    }
-
-    private var accessibilityTitle: String {
-        switch destination.host {
-        case "weight": "Log weight"
-        case "workout": "Start workout"
-        default: "Open plan"
-        }
-    }
 }
 
 struct TodayDailyWidget: Widget {
@@ -293,14 +118,142 @@ struct TodayDailyWidget: Widget {
             TodayWidgetEntryView(entry: entry)
         }
         .configurationDisplayName("Today")
-        .description("Private training status, weekly progress, and quick actions.")
+        .description("Training status and weekly progress for your Lock Screen.")
         .supportedFamilies([
             .accessoryInline,
+            .accessoryCircular,
             .accessoryRectangular,
-            .systemSmall,
-            .systemMedium,
-            .systemLarge,
         ])
+    }
+}
+
+private struct TodayLiveActivityView: View {
+    let state: TodaySessionAttributes.ContentState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            HStack(spacing: 10) {
+                Image(systemName: state.symbolName)
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(accent)
+                    .frame(width: 34, height: 34)
+                    .background(accent.opacity(0.16), in: RoundedRectangle(cornerRadius: 10))
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(state.headline)
+                        .font(.headline.weight(.bold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                    Text(state.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 6)
+                Text(weeklyPercent)
+                    .font(.caption.monospacedDigit().weight(.bold))
+                    .foregroundStyle(accent)
+            }
+
+            if !state.tasks.isEmpty {
+                HStack(spacing: 8) {
+                    ForEach(state.tasks, id: \.title) { task in
+                        Label(task.title, systemImage: task.isComplete ? "checkmark.circle.fill" : task.symbolName)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(task.isComplete ? .green : .primary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 6)
+                            .background(.fill.quaternary, in: Capsule())
+                    }
+                }
+                .privacySensitive()
+            }
+
+            ProgressView(value: weeklyRatio)
+                .tint(accent)
+                .privacySensitive()
+        }
+        .padding(14)
+        .activityBackgroundTint(Color(.secondarySystemBackground))
+        .activitySystemActionForegroundColor(accent)
+        .widgetURL(URL(string: "today://")!)
+    }
+
+    private var accent: Color {
+        switch state.phase {
+        case .weight: .orange
+        case .plan, .remaining: .green
+        case .done: .mint
+        case .recovery: .indigo
+        case .unavailable: .secondary
+        }
+    }
+
+    private var weeklyRatio: Double {
+        guard state.plannedMiles > 0 else { return 0 }
+        return min(max(state.completedMiles / state.plannedMiles, 0), 1)
+    }
+
+    private var weeklyPercent: String {
+        guard state.plannedMiles > 0 else { return "This week" }
+        return weeklyRatio.formatted(.percent.precision(.fractionLength(0)))
+    }
+}
+
+struct TodaySessionLiveActivity: Widget {
+    var body: some WidgetConfiguration {
+        ActivityConfiguration(for: TodaySessionAttributes.self) { context in
+            TodayLiveActivityView(state: context.state)
+        } dynamicIsland: { context in
+            DynamicIsland {
+                DynamicIslandExpandedRegion(.leading) {
+                    Label("Today", systemImage: context.state.symbolName)
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(.green)
+                }
+                DynamicIslandExpandedRegion(.trailing) {
+                    Text(weeklyPercent(for: context.state))
+                        .font(.caption.monospacedDigit().weight(.bold))
+                }
+                DynamicIslandExpandedRegion(.bottom) {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text(context.state.headline)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+                        HStack(spacing: 12) {
+                            ForEach(context.state.tasks.prefix(2), id: \.title) { task in
+                                Label(
+                                    task.title,
+                                    systemImage: task.isComplete ? "checkmark.circle.fill" : task.symbolName
+                                )
+                                .font(.caption2.weight(.semibold))
+                                .lineLimit(1)
+                            }
+                        }
+                        .privacySensitive()
+                    }
+                }
+            } compactLeading: {
+                Image(systemName: context.state.symbolName)
+                    .foregroundStyle(.green)
+            } compactTrailing: {
+                Text(weeklyPercent(for: context.state))
+                    .font(.caption2.monospacedDigit().weight(.bold))
+            } minimal: {
+                Image(systemName: context.state.symbolName)
+                    .foregroundStyle(.green)
+            }
+            .widgetURL(URL(string: "today://")!)
+            .keylineTint(.green)
+        }
+    }
+
+    private func weeklyPercent(for state: TodaySessionAttributes.ContentState) -> String {
+        guard state.plannedMiles > 0 else { return "Today" }
+        let ratio = min(max(state.completedMiles / state.plannedMiles, 0), 1)
+        return ratio.formatted(.percent.precision(.fractionLength(0)))
     }
 }
 
@@ -308,22 +261,17 @@ struct TodayDailyWidget: Widget {
 struct TodayWidgetBundle: WidgetBundle {
     var body: some Widget {
         TodayDailyWidget()
+        TodaySessionLiveActivity()
     }
 }
 
-#Preview(as: .systemSmall) {
+#Preview(as: .accessoryCircular) {
     TodayDailyWidget()
 } timeline: {
     TodayWidgetEntry(date: .now, snapshot: .placeholder)
 }
 
-#Preview(as: .systemMedium) {
-    TodayDailyWidget()
-} timeline: {
-    TodayWidgetEntry(date: .now, snapshot: .placeholder)
-}
-
-#Preview(as: .systemLarge) {
+#Preview(as: .accessoryRectangular) {
     TodayDailyWidget()
 } timeline: {
     TodayWidgetEntry(date: .now, snapshot: .placeholder)

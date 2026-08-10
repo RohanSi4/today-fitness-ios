@@ -7,6 +7,7 @@ struct TodayView: View {
     @ObservedObject var catalog: ExerciseCatalog
     @ObservedObject var runService: RunningWorkoutService
     @StateObject private var watchWorkouts = WatchWorkoutService.shared
+    @StateObject private var liveActivity = TodayLiveActivityManager.shared
 
     private var day: TrainingPlanDay? { planService.today }
     private var weeklySnapshot: WeeklyTrainingSnapshot {
@@ -33,6 +34,7 @@ struct TodayView: View {
                     workoutCard
                 }
                 trainingStatus
+                lockScreenAction
                 if store.activeWorkout == nil {
                     workoutCard
                 }
@@ -70,6 +72,48 @@ struct TodayView: View {
             async let plan: Void = planService.refresh()
             async let exercises: Void = catalog.refreshIfNeeded()
             _ = await (plan, exercises)
+        }
+    }
+
+    private var lockScreenAction: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                Task {
+                    if liveActivity.isPresented {
+                        await liveActivity.remove()
+                    } else if let state = TodayLiveActivityStateBuilder.make(
+                        store: store,
+                        plan: planService.plan,
+                        runs: runService.workouts
+                    ) {
+                        await liveActivity.present(state)
+                    }
+                }
+            } label: {
+                HStack {
+                    Label(
+                        liveActivity.isPresented ? "On Lock Screen" : "Pin today to Lock Screen",
+                        systemImage: liveActivity.isPresented ? "checkmark.iphone" : "iphone"
+                    )
+                    Spacer()
+                    if liveActivity.isUpdating {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: liveActivity.isPresented ? "xmark" : "plus")
+                            .font(.caption.weight(.bold))
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.bordered)
+            .disabled(liveActivity.isUpdating)
+            .accessibilityIdentifier("lock-screen-activity-button")
+
+            if let error = liveActivity.errorMessage {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(TodayPalette.warm)
+            }
         }
     }
 

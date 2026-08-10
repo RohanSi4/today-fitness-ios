@@ -734,6 +734,107 @@ struct WeeklyTrainingSnapshotTests {
         #expect(doneState.deepLink.host == "history")
     }
 
+    @Test func liveActivityShowsPlanTasksAndEndsWhenTrainingIsComplete() throws {
+        let calendar = utcCalendar
+        let now = try #require(date("2026-07-22T12:00:00Z"))
+        let plan = samplePlan(todayText: "5 mile run + lower body lift")
+        let runStart = try #require(date("2026-07-22T08:00:00Z"))
+        let run = RunningWorkoutSummary(
+            id: UUID(),
+            startedAt: runStart,
+            endedAt: runStart.addingTimeInterval(2_400),
+            miles: 5,
+            duration: 2_400
+        )
+        let lift = WorkoutSession(
+            kind: .lower,
+            startedAt: runStart.addingTimeInterval(4_000),
+            endedAt: runStart.addingTimeInterval(5_000),
+            exercises: [
+                LoggedExercise(
+                    exerciseID: "leg-extension",
+                    sets: [LoggedSet(weight: 100, reps: 10, isComplete: true)]
+                ),
+            ]
+        )
+        let week = WeeklyTrainingBuilder.build(
+            plan: plan,
+            runs: [run],
+            lifts: [lift],
+            now: now,
+            calendar: calendar
+        )
+        let day = try #require(week.day(for: now, calendar: calendar))
+        let weightFirstSnapshot = TodayWidgetPublisher.makeSnapshot(
+            weightLogged: false,
+            day: day,
+            week: week,
+            now: now,
+            calendar: calendar
+        )
+
+        let state = TodayLiveActivityStateBuilder.make(
+            snapshot: weightFirstSnapshot,
+            day: day,
+            week: week,
+            activeWorkout: nil,
+            now: now
+        )
+
+        #expect(state.phase == .done)
+        #expect(state.tasks.map(\.title) == ["5 mi run", "Lower"])
+        let allTasksComplete = state.tasks.allSatisfy(\.isComplete)
+        #expect(allTasksComplete)
+        #expect(try JSONDecoder().decode(
+            TodaySessionAttributes.ContentState.self,
+            from: JSONEncoder().encode(state)
+        ) == state)
+    }
+
+    @Test func liveActivityUsesActiveStrengthProgressWithoutMarkingTheDayDone() throws {
+        let calendar = utcCalendar
+        let now = try #require(date("2026-07-22T12:00:00Z"))
+        let plan = samplePlan(todayText: "5 mile run + lower body lift")
+        let week = WeeklyTrainingBuilder.build(
+            plan: plan,
+            runs: [],
+            lifts: [],
+            now: now,
+            calendar: calendar
+        )
+        let day = try #require(week.day(for: now, calendar: calendar))
+        let snapshot = TodayWidgetPublisher.makeSnapshot(
+            weightLogged: true,
+            day: day,
+            week: week,
+            now: now,
+            calendar: calendar
+        )
+        let active = WorkoutSession(
+            kind: .lower,
+            startedAt: now,
+            endedAt: nil,
+            exercises: [
+                LoggedExercise(
+                    exerciseID: "leg-extension",
+                    sets: [LoggedSet(weight: 100, reps: 10, isComplete: true)]
+                ),
+            ]
+        )
+
+        let state = TodayLiveActivityStateBuilder.make(
+            snapshot: snapshot,
+            day: day,
+            week: week,
+            activeWorkout: active,
+            now: now
+        )
+
+        #expect(state.phase == .remaining)
+        #expect(state.headline == "Lower workout in progress")
+        #expect(state.detail == "1 working set checked off")
+    }
+
     @Test func widgetPayloadCannotContainExactWeightOrExerciseDetails() throws {
         let calendar = utcCalendar
         let now = try #require(date("2026-07-22T12:00:00Z"))

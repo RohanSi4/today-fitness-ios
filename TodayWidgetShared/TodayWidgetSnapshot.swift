@@ -1,6 +1,6 @@
 import Foundation
 
-enum TodayWidgetPhase: String, Codable {
+enum TodayWidgetPhase: String, Codable, Hashable {
     case weight
     case plan
     case remaining
