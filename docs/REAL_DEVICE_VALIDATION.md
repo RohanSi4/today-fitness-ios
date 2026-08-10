@@ -44,7 +44,7 @@ not acceptable for a release-gating row.
 
 | ID | Path | Check | Status | Evidence / defect |
 | --- | --- | --- | --- | --- |
-| D01 | Signed install | App launches as **Today** after a fresh signed install and again after force-quit. | | Signed upgrade install, launch, forced termination, and relaunch passed; Rohan confirmed the app opened normally. Fresh uninstall/reinstall not run because it would erase local state. |
+| D01 | Signed install | App launches as **Today** after a fresh signed install and again after force-quit. | | Signed upgrade install, launch, forced termination, and relaunch passed; Rohan confirmed the app opened normally, and CoreDevice later showed both app and widget-extension processes alive. Fresh uninstall/reinstall not run because it would erase local state. |
 | D02 | Health authorization | First launch requests only the expected Health read/write permissions; denial leaves the app usable. | | |
 | D03 | Health reads | Insights shows the known run, sleep, and movement data without sample-data labels. | | |
 | D04 | Body-mass write | Enter a distinctive test weight, verify one matching Apple Health sample, then correct it and verify replacement behavior. | | |
