@@ -48,7 +48,7 @@ it can become a reusable starter after the real workflow is proven.
 - Keeps run stretches as a quick visual reference instead of making every session a checklist
 - Focuses the warm-up on seven marathon-relevant dynamic moves and trims the post-run list to five useful holds
 - Adds a timer-first post-run flow that waits for play, guides 30-second holds, gives 5 seconds to switch, and supports pause, back, skip, and a routine wheel
-- Searches an offline-cached catalog of more than 700 lifting exercises
+- Searches the loaded offline catalog and reports its actual current size in the UI
 - Shows a compact live coverage card with direct working-set counts and any planned muscles still missing
 - Shows workout duration, PRs, next targets, weekly training totals, actionable strength trends, and a private 30-day weight trend
 - Lets workouts and weights be corrected, deleted, or reopened from History without rebuilding them
@@ -89,7 +89,7 @@ number, average, change, goal, or logging history is sent to the public site.
 
 ## Exercise catalog and anatomy
 
-Today ships its own library of 252 exercises, so the catalog is complete with no
+Today ships its own library of 255 exercises, so the catalog is complete with no
 network. It leans deliberately toward machines, cables, and their attachments, because
 that is what most of my sessions are made of, and every entry has a hand-written
 per-head muscle map.
@@ -207,6 +207,10 @@ The project already uses automatic signing and has Rohan's development team sele
 5. Press the Run triangle or `Command-R`.
 6. If the phone asks for Developer Mode, open **Settings > Privacy & Security > Developer Mode**, turn it on, restart, confirm it after the restart, then press Run in Xcode again.
 7. On first launch, allow Apple Health access and notifications. The workout logger remains separate from the Apple Watch workout record, and exact weight stays private.
+
+Before treating the signed integration paths as release-verified, complete
+[`docs/REAL_DEVICE_VALIDATION.md`](docs/REAL_DEVICE_VALIDATION.md). Simulator and CI
+cannot substitute for that device record.
 
 To add the daily widget, hold the iPhone Lock Screen, tap **Customize**, choose
 **Lock Screen**, tap the widget area below the clock, and add **Today**. The rectangular
