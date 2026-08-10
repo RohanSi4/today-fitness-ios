@@ -367,7 +367,7 @@ enum TodayWidgetPublisher {
         if !hasPlannedWork {
             return (
                 .recovery,
-                day.plannedOther ?? "Nothing planned",
+                "Recovery day",
                 "Recovery counts too",
                 "moon.stars.fill",
                 URL(string: "today://")!
@@ -375,47 +375,29 @@ enum TodayWidgetPublisher {
         }
 
         if !needsRun && !needsLift {
-            let stats = completedStats(day)
             return (
                 .done,
                 "Done for the day",
-                stats.isEmpty ? "Everything is checked off" : stats,
+                "Everything is checked off",
                 "checkmark.circle.fill",
                 URL(string: "today://history")!
             )
         }
 
-        var work: [String] = []
-        if needsRun, let miles = day.plannedRunMiles {
-            work.append("\(formatMiles(miles)) mi run")
+        let headline: String
+        if needsRun && needsLift {
+            headline = "Run + strength"
+        } else if needsRun {
+            headline = "Run remaining"
+        } else {
+            headline = "Strength remaining"
         }
-        if needsLift, let lift = day.plannedLift {
-            work.append("\(lift.title) lift")
-        }
-        let completed = completedStats(day)
         return (
             needsRun && needsLift ? .plan : .remaining,
-            work.joined(separator: " + "),
-            completed.isEmpty ? "Tap to open Today" : "Done: \(completed)",
+            headline,
+            "Open Today for the private plan",
             needsLift && !needsRun ? "dumbbell.fill" : "figure.run",
             needsLift && !needsRun ? URL(string: "today://workout")! : URL(string: "today://")!
         )
-    }
-
-    private static func completedStats(_ day: WeeklyDaySnapshot) -> String {
-        var values: [String] = []
-        if let run = day.run, day.runCompleted {
-            let minutes = Int((run.duration / 60).rounded())
-            values.append("\(formatMiles(run.miles)) mi in \(minutes)m")
-        }
-        if let lift = day.lift {
-            let sets = lift.completedSetCount
-            values.append("\(sets) \(sets == 1 ? "set" : "sets")")
-        }
-        return values.joined(separator: " · ")
-    }
-
-    private static func formatMiles(_ miles: Double) -> String {
-        miles.formatted(.number.precision(.fractionLength(miles.rounded() == miles ? 0 : 1)))
     }
 }

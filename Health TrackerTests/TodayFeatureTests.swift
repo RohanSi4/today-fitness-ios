@@ -495,7 +495,8 @@ struct WeeklyTrainingSnapshotTests {
             calendar: calendar
         )
         #expect(planState.phase == .plan)
-        #expect(planState.headline == "5 mi run + Lower lift")
+        #expect(planState.headline == "Run + strength")
+        #expect(planState.detail == "Open Today for the private plan")
 
         let runStart = try #require(date("2026-07-22T08:00:00Z"))
         let run = RunningWorkoutSummary(
@@ -521,8 +522,8 @@ struct WeeklyTrainingSnapshotTests {
             calendar: calendar
         )
         #expect(remainingState.phase == .remaining)
-        #expect(remainingState.headline == "Lower lift")
-        #expect(remainingState.detail.contains("5 mi in 40m"))
+        #expect(remainingState.headline == "Strength remaining")
+        #expect(remainingState.detail == "Open Today for the private plan")
         #expect(remainingState.deepLink.host == "workout")
 
         let lift = WorkoutSession(
@@ -553,19 +554,60 @@ struct WeeklyTrainingSnapshotTests {
         )
         #expect(doneState.phase == .done)
         #expect(doneState.headline == "Done for the day")
-        #expect(doneState.detail == "5 mi in 40m · 1 set")
+        #expect(doneState.detail == "Everything is checked off")
         #expect(doneState.deepLink.host == "history")
     }
 
     @Test func widgetPayloadCannotContainExactWeightOrExerciseDetails() throws {
-        let snapshot = TodayWidgetSnapshot.placeholder
+        let calendar = utcCalendar
+        let now = try #require(date("2026-07-22T12:00:00Z"))
+        let plan = samplePlan(todayText: "5 mile run + lower body lift")
+        let runStart = try #require(date("2026-07-22T08:00:00Z"))
+        let run = RunningWorkoutSummary(
+            id: UUID(),
+            startedAt: runStart,
+            endedAt: runStart.addingTimeInterval(2_400),
+            miles: 5,
+            duration: 2_400
+        )
+        let lift = WorkoutSession(
+            kind: .lower,
+            startedAt: runStart.addingTimeInterval(4_000),
+            endedAt: runStart.addingTimeInterval(5_000),
+            exercises: [
+                LoggedExercise(
+                    exerciseID: "leg-extension",
+                    sets: [LoggedSet(weight: 100, reps: 10, isComplete: true)]
+                ),
+            ]
+        )
+        let week = WeeklyTrainingBuilder.build(
+            plan: plan,
+            runs: [run],
+            lifts: [lift],
+            now: now,
+            calendar: calendar
+        )
+        let day = try #require(week.day(for: now, calendar: calendar))
+        let snapshot = TodayWidgetPublisher.makeSnapshot(
+            weightLogged: true,
+            day: day,
+            week: week,
+            now: now,
+            calendar: calendar
+        )
         let encoded = try JSONEncoder().encode(snapshot)
         let json = try #require(String(data: encoded, encoding: .utf8))
 
         #expect(!json.contains("184.4"))
         #expect(!json.contains("machine-chest-fly"))
+        #expect(!json.contains("leg-extension"))
         #expect(!json.contains("exercise"))
         #expect(!json.contains("pounds"))
+        #expect(!json.contains("Lower"))
+        #expect(!json.contains("10 reps"))
+        #expect(!json.contains("1 set"))
+        #expect(!json.contains("5 mi in 40m"))
     }
 
     @Test func theTimeTrialDayCountsAsDoneOnceTheHardEffortIsRun() throws {
