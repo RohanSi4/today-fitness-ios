@@ -9,7 +9,7 @@ This is the release gate for those paths. A blank row means **not verified**.
 | Field | Value |
 | --- | --- |
 | Date | 2026-08-09 |
-| Commit | `9b518b1` plus the installer fix being recorded with this run |
+| Commit | `9a7718a` (installer fix and device-run record; app source unchanged during the run) |
 | Tester | Codex automation; hands-on checks require Rohan |
 | iPhone model / iOS | iPhone 17 Pro Max / iOS 26.5.2; paired over USB |
 | Apple Watch model / watchOS | Apple Watch Ultra 2; paired and available; OS version not reported |
@@ -44,7 +44,7 @@ not acceptable for a release-gating row.
 
 | ID | Path | Check | Status | Evidence / defect |
 | --- | --- | --- | --- | --- |
-| D01 | Signed install | App launches as **Today** after a fresh signed install and again after force-quit. | | Signed upgrade install, launch, forced termination, and relaunch passed. Fresh uninstall/reinstall not run because it would erase local state. |
+| D01 | Signed install | App launches as **Today** after a fresh signed install and again after force-quit. | | Signed upgrade install, launch, forced termination, and relaunch passed; Rohan confirmed the app opened normally. Fresh uninstall/reinstall not run because it would erase local state. |
 | D02 | Health authorization | First launch requests only the expected Health read/write permissions; denial leaves the app usable. | | |
 | D03 | Health reads | Insights shows the known run, sleep, and movement data without sample-data labels. | | |
 | D04 | Body-mass write | Enter a distinctive test weight, verify one matching Apple Health sample, then correct it and verify replacement behavior. | | |
@@ -70,7 +70,7 @@ not acceptable for a release-gating row.
 
 | Automated check | Result |
 | --- | --- |
-| App unit/UI suite (ScreenshotWalkthrough skipped) | |
-| TodayWidget build | |
+| App unit/UI suite (ScreenshotWalkthrough skipped) | PASS — simulator `xcodebuild test` exited 0 on 2026-08-09; a transient UI-runner clone launch was retried successfully by Xcode. |
+| TodayWidget build | PASS — signed build for the connected physical iPhone exited 0 on 2026-08-09. |
 
 Release decision: **NOT VERIFIED** until every required row is completed.
