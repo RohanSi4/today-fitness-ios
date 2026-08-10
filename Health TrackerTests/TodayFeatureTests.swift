@@ -381,7 +381,7 @@ struct TrainingPlanModelTests {
         #expect(day.hasRun)
     }
 
-    @Test func planValidationRejectsOversizedOrOutOfWeekPayloads() {
+    @Test func planValidationAllowsBridgeDaysButRejectsStaleOrFuturePayloads() {
         let valid = TrainingPlan(
             weekStart: "2026-07-20",
             weekEnd: "2026-07-26",
@@ -410,14 +410,190 @@ struct TrainingPlanModelTests {
                 ),
             ]
         )
+        let bridged = TrainingPlan(
+            weekStart: "2026-08-10",
+            weekEnd: "2026-08-16",
+            prescribedMiles: 38,
+            days: [
+                TrainingPlanDay(
+                    date: "2026-08-09",
+                    dayLabel: "Sun 8/9",
+                    text: "13 mile long run",
+                    isKeyDay: true,
+                    details: []
+                ),
+            ]
+        )
+        let tooOld = TrainingPlan(
+            weekStart: bridged.weekStart,
+            weekEnd: bridged.weekEnd,
+            prescribedMiles: bridged.prescribedMiles,
+            days: [
+                TrainingPlanDay(
+                    date: "2026-08-02",
+                    dayLabel: "Sun 8/2",
+                    text: "8 mile run",
+                    isKeyDay: true,
+                    details: []
+                ),
+            ]
+        )
 
         #expect(TrainingPlanService.isPlausible(valid))
+        #expect(TrainingPlanService.isPlausible(bridged))
+        #expect(!TrainingPlanService.isPlausible(tooOld))
         #expect(!TrainingPlanService.isPlausible(invalid))
+    }
+}
+
+struct PlanProgressPresentationTests {
+    @Test func completedRunInstructionsDisappearWhileLiftAndSwimStayActionable() {
+        let day = mixedDay()
+
+        let tasks = day.remainingTasks(runCompleted: true, liftCompleted: false)
+        let details = day.remainingDetails(runCompleted: true, liftCompleted: false)
+
+        #expect(tasks == ["lower body lift", "swim"])
+        #expect(!details.contains("Keep the run easy and conversational."))
+        #expect(!details.contains("Run outdoors in the morning."))
+        #expect(!details.contains("Take a gel around 40 minutes."))
+        #expect(details.contains("Complete lower body lift #1 as the main lower session."))
+        #expect(details.contains("Skip heavy calf work in this lift."))
+        #expect(details.contains("Swim 35 to 40 minutes, technique only with no hard sets."))
+        #expect(details.contains("Count strokes: aim for 14 per 25 yard length, holding your time per length."))
+    }
+
+    @Test func completedLiftInstructionsDisappearWhileTheRunAndSwimStay() {
+        let day = mixedDay()
+
+        let tasks = day.remainingTasks(runCompleted: false, liftCompleted: true)
+        let details = day.remainingDetails(runCompleted: false, liftCompleted: true)
+
+        #expect(tasks == ["5 mile run", "swim"])
+        #expect(details.contains("Keep the run easy and conversational."))
+        #expect(!details.contains("Complete lower body lift #1 as the main lower session."))
+        #expect(!details.contains("Skip heavy calf work in this lift."))
+        #expect(details.contains("Swim 35 to 40 minutes, technique only with no hard sets."))
+    }
+
+    @Test func aSwimStillRemainsAfterTrackedRunAndLiftWorkAreDone() {
+        let day = mixedDay()
+
+        #expect(day.remainingTasks(runCompleted: true, liftCompleted: true) == ["swim"])
+        #expect(
+            day.remainingDetails(runCompleted: true, liftCompleted: true) == [
+                "Swim 35 to 40 minutes, technique only with no hard sets.",
+                "Count strokes: aim for 14 per 25 yard length, holding your time per length.",
+            ]
+        )
+    }
+
+    @Test func unknownFutureInstructionsArePreservedRatherThanSilentlyHidden() {
+        let day = TrainingPlanDay(
+            date: "2026-08-09",
+            dayLabel: "Sun 8/9",
+            text: "5 mile run",
+            isKeyDay: false,
+            details: ["New coach instruction the app does not classify yet."]
+        )
+
+        #expect(day.remainingDetails(runCompleted: true, liftCompleted: false) == day.details)
+    }
+
+    @Test func postRunSummaryIsFactualAndShowsPlanAndWeeklyImpact() {
+        let start = Date(timeIntervalSince1970: 1_786_200_000)
+        let run = RunningWorkoutSummary(
+            id: UUID(),
+            startedAt: start,
+            endedAt: start.addingTimeInterval(2_400),
+            miles: 5.1,
+            duration: 2_400
+        )
+        let summary = PostRunSummary(
+            run: run,
+            plannedMiles: 5,
+            completedWeekMiles: 12,
+            prescribedWeekMiles: 35
+        )
+
+        #expect(summary.distance == "5.1 mi")
+        #expect(summary.duration == "40m")
+        #expect(summary.pace == "7:51")
+        #expect(summary.planInsight == "You matched today’s 5 mile outline.")
+        #expect(summary.weekProgress == 12.0 / 35.0)
+        #expect(summary.weekProgressLabel == "12 of 35 mi")
+        #expect(summary.weekInsight == "This run supplied 15% of the weekly outline. 23 mi remain this week.")
+    }
+
+    private func mixedDay() -> TrainingPlanDay {
+        TrainingPlanDay(
+            date: "2026-08-09",
+            dayLabel: "Sun 8/9",
+            text: "5 mile run + lower body lift + swim",
+            isKeyDay: false,
+            details: [
+                "Keep the run easy and conversational.",
+                "Run outdoors in the morning.",
+                "Take a gel around 40 minutes.",
+                "Complete lower body lift #1 as the main lower session.",
+                "Skip heavy calf work in this lift.",
+                "Swim 35 to 40 minutes, technique only with no hard sets.",
+                "Count strokes: aim for 14 per 25 yard length, holding your time per length.",
+            ]
+        )
     }
 }
 
 @MainActor
 struct WeeklyTrainingSnapshotTests {
+    @Test func bridgeDayRemainsVisibleWithoutPollutingTheDeclaredWeek() throws {
+        let calendar = utcCalendar
+        let bridgeDate = try #require(date("2026-08-09T08:00:00Z"))
+        let run = RunningWorkoutSummary(
+            id: UUID(),
+            startedAt: bridgeDate,
+            endedAt: bridgeDate.addingTimeInterval(7_800),
+            miles: 13,
+            duration: 7_800
+        )
+        let plan = TrainingPlan(
+            weekStart: "2026-08-10",
+            weekEnd: "2026-08-16",
+            prescribedMiles: 38,
+            days: [
+                TrainingPlanDay(
+                    date: "2026-08-09",
+                    dayLabel: "Sun 8/9",
+                    text: "13 mile long run + optional walk",
+                    isKeyDay: true,
+                    details: ["Keep the long run conversational."]
+                ),
+                TrainingPlanDay(
+                    date: "2026-08-10",
+                    dayLabel: "Mon 8/10",
+                    text: "4 mile run",
+                    isKeyDay: false,
+                    details: []
+                ),
+            ]
+        )
+
+        let snapshot = WeeklyTrainingBuilder.build(
+            plan: plan,
+            runs: [run],
+            lifts: [],
+            now: bridgeDate,
+            calendar: calendar
+        )
+
+        #expect(snapshot.day(for: bridgeDate, calendar: calendar)?.runCompleted == true)
+        #expect(!snapshot.containsInDeclaredWeek(bridgeDate, calendar: calendar))
+        #expect(snapshot.completedMiles == 0)
+        #expect(snapshot.completedRuns == 0)
+        #expect(snapshot.startDate == date("2026-08-10T00:00:00Z"))
+        #expect(snapshot.endDate == date("2026-08-16T00:00:00Z"))
+    }
+
     @Test func weeklySnapshotCombinesPlanRunsAndLifts() throws {
         let calendar = utcCalendar
         let now = try #require(date("2026-07-22T12:00:00Z"))

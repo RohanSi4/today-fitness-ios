@@ -76,6 +76,9 @@ final class TrainingPlanService: ObservableObject {
 
     static func isPlausible(_ plan: TrainingPlan) -> Bool {
         let datePattern = /^\d{4}-\d{2}-\d{2}$/
+        guard let earliestAllowedDay = shiftedDateKey(plan.weekStart, days: -7) else {
+            return false
+        }
         return plan.weekStart.wholeMatch(of: datePattern) != nil
             && plan.weekEnd.wholeMatch(of: datePattern) != nil
             && plan.weekStart <= plan.weekEnd
@@ -84,7 +87,11 @@ final class TrainingPlanService: ObservableObject {
             && (1...14).contains(plan.days.count)
             && plan.days.allSatisfy { day in
                 day.date.wholeMatch(of: datePattern) != nil
-                    && day.date >= plan.weekStart
+                    // The coach publishes next week on Sunday and carries up to
+                    // seven closing days from the current week so Today does not
+                    // go blank during the handoff. They are display bridges, not
+                    // part of the new week's prescribed mileage.
+                    && day.date >= earliestAllowedDay
                     && day.date <= plan.weekEnd
                     && day.text.count <= 300
                     && day.details.count <= 12
@@ -92,10 +99,30 @@ final class TrainingPlanService: ObservableObject {
             }
     }
 
+    private static func shiftedDateKey(_ key: String, days: Int) -> String? {
+        let parts = key.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3 else { return nil }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let components = DateComponents(
+            calendar: calendar,
+            timeZone: calendar.timeZone,
+            year: parts[0],
+            month: parts[1],
+            day: parts[2]
+        )
+        guard let date = components.date,
+              let shifted = calendar.date(byAdding: .day, value: days, to: date) else {
+            return nil
+        }
+        return dayFormatter.string(from: shifted)
+    }
+
     private static let dayFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter
     }()

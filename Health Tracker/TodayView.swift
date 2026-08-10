@@ -32,7 +32,7 @@ struct TodayView: View {
                 if store.activeWorkout != nil {
                     workoutCard
                 }
-                planCard
+                trainingStatus
                 if store.activeWorkout == nil {
                     workoutCard
                 }
@@ -61,7 +61,11 @@ struct TodayView: View {
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Today")
         .navigationBarTitleDisplayMode(.inline)
-        .refreshable { await planService.refresh() }
+        .refreshable {
+            async let plan: Void = planService.refresh()
+            async let runs: Void = runService.refresh()
+            _ = await (plan, runs)
+        }
         .task {
             async let plan: Void = planService.refresh()
             async let exercises: Void = catalog.refreshIfNeeded()
@@ -104,6 +108,9 @@ struct TodayView: View {
         if let kind = day?.workoutKind {
             chips.append((kind.title, "dumbbell.fill", todayProgress?.liftCompleted == true))
         }
+        if day?.hasSwim == true {
+            chips.append(("Swim", "figure.pool.swim", false))
+        }
         return chips
     }
 
@@ -114,16 +121,15 @@ struct TodayView: View {
         if day?.isRestOnly == true {
             return "Recovery day · keep movement easy"
         }
-        // Name what is still owed. The old fallback ("Your plan, training, and
-        // recovery context") fired on every run-only day — which is most days —
-        // and told him nothing he could act on.
-        var remaining: [String] = []
-        if day?.plannedRunMiles != nil, todayProgress?.runCompleted != true { remaining.append("run") }
-        if day?.workoutKind != nil, todayProgress?.liftCompleted != true { remaining.append("lift") }
+        guard let day else { return "Nothing planned · start any workout below" }
+        let remaining = day.remainingTasks(
+            runCompleted: todayProgress?.runCompleted == true,
+            liftCompleted: todayProgress?.liftCompleted == true
+        ).map(day.shortTaskName)
         if !remaining.isEmpty {
-            return "\(remaining.joined(separator: " and ")) still to do".capitalizedFirst
+            return "\(remaining.formatted(.list(type: .and))) still to do".capitalizedFirst
         }
-        return day == nil ? "Nothing planned · start any workout below" : "Everything is checked off"
+        return "Everything is checked off"
     }
 
     /// Weight and stretches are both one-tap side errands, and each was taking a
@@ -188,6 +194,34 @@ struct TodayView: View {
     }
 
     @ViewBuilder
+    private var trainingStatus: some View {
+        if let progress = todayProgress,
+           let run = progress.run,
+           progress.runCompleted || day?.plannedRunMiles == nil {
+            let remainingTasks = day?.remainingTasks(
+                runCompleted: true,
+                liftCompleted: progress.liftCompleted
+            ) ?? []
+            let remainingDetails = day?.remainingDetails(
+                runCompleted: true,
+                liftCompleted: progress.liftCompleted
+            ) ?? []
+            PostRunDashboard(
+                run: run,
+                plannedMiles: day?.plannedRunMiles,
+                week: weeklySnapshot,
+                includeWeeklyImpact: weeklySnapshot.containsInDeclaredWeek(run.startedAt),
+                dayComplete: day != nil && remainingTasks.isEmpty
+            )
+            if !remainingTasks.isEmpty {
+                RemainingPlanCard(tasks: remainingTasks, details: remainingDetails)
+            }
+        } else {
+            planCard
+        }
+    }
+
+    @ViewBuilder
     private var planCard: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
@@ -200,16 +234,27 @@ struct TodayView: View {
             }
 
             if let day {
-                Text(todayProgress?.isFullyComplete == true ? "Done for the day" : day.text.capitalizedFirst)
+                let runCompleted = todayProgress?.runCompleted == true
+                let liftCompleted = todayProgress?.liftCompleted == true
+                let remainingTasks = day.remainingTasks(
+                    runCompleted: runCompleted,
+                    liftCompleted: liftCompleted
+                )
+                let remainingDetails = day.remainingDetails(
+                    runCompleted: runCompleted,
+                    liftCompleted: liftCompleted
+                )
+
+                Text(remainingTasks.isEmpty ? "Done for the day" : remainingTasks.joined(separator: " + ").capitalizedFirst)
                     .font(.title3.weight(.bold))
 
-                if todayProgress?.isFullyComplete == true, let todayProgress {
+                if remainingTasks.isEmpty, let todayProgress {
                     Label(completionSummary(todayProgress), systemImage: "checkmark.circle.fill")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.green)
-                } else if !day.details.isEmpty {
+                } else if !remainingDetails.isEmpty {
                     VStack(alignment: .leading, spacing: 9) {
-                        ForEach(day.details, id: \.self) { detail in
+                        ForEach(remainingDetails, id: \.self) { detail in
                             HStack(alignment: .top, spacing: 9) {
                                 Circle()
                                     .fill(TodayPalette.accent)
@@ -223,12 +268,8 @@ struct TodayView: View {
                     }
                 }
 
-                if todayProgress?.isFullyComplete != true {
-                    if let progress = todayProgress, progress.runCompleted, let run = progress.run {
-                        completedRunRow(run)
-                    } else if let miles = day.plannedRunMiles {
-                        watchRunButton(day: day, miles: miles)
-                    }
+                if !runCompleted, let miles = day.plannedRunMiles {
+                    watchRunButton(day: day, miles: miles)
                 }
 
             } else if planService.isLoading || (planService.plan == nil && planService.errorMessage == nil) {
@@ -286,21 +327,6 @@ struct TodayView: View {
                     .foregroundStyle(TodayPalette.warm)
             }
         }
-    }
-
-    private func completedRunRow(_ run: RunningWorkoutSummary) -> some View {
-        HStack(spacing: 9) {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Run logged")
-                    .font(.subheadline.weight(.semibold))
-                Text(runSummary(run))
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(.top, 2)
     }
 
     private func completionSummary(_ day: WeeklyDaySnapshot) -> String {

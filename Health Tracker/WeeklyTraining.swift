@@ -146,22 +146,32 @@ struct WeeklyTrainingSnapshot: Equatable {
     let prescribedMiles: Double
     let days: [WeeklyDaySnapshot]
 
-    var completedMiles: Double {
-        days.compactMap(\.run).reduce(0) { $0 + $1.miles }
+    private var inWeekDays: [WeeklyDaySnapshot] {
+        days.filter { $0.date >= startDate && $0.date <= endDate }
     }
 
-    var completedRuns: Int { days.compactMap(\.run).count }
+    var completedMiles: Double {
+        inWeekDays.compactMap(\.run).reduce(0) { $0 + $1.miles }
+    }
+
+    var completedRuns: Int { inWeekDays.compactMap(\.run).count }
 
     var completedLifts: Int {
-        days.reduce(0) { total, day in
+        inWeekDays.reduce(0) { total, day in
             total + (day.lift == nil ? 0 : 1) + (day.extraLift == nil ? 0 : 1)
         }
     }
 
     var workingSets: Int {
-        days.reduce(0) { total, day in
+        inWeekDays.reduce(0) { total, day in
             total + (day.lift?.completedSetCount ?? 0) + (day.extraLift?.completedSetCount ?? 0)
         }
+    }
+
+    func containsInDeclaredWeek(_ date: Date, calendar: Calendar = .current) -> Bool {
+        let value = calendar.startOfDay(for: date)
+        return value >= calendar.startOfDay(for: startDate)
+            && value <= calendar.startOfDay(for: endDate)
     }
 
     func day(for date: Date, calendar: Calendar = .current) -> WeeklyDaySnapshot? {
@@ -220,9 +230,11 @@ enum WeeklyTrainingBuilder {
             )
         }
 
+        let declaredStart = plan.flatMap { date(from: $0.weekStart, calendar: calendar) }
+        let declaredEnd = plan.flatMap { date(from: $0.weekEnd, calendar: calendar) }
         return WeeklyTrainingSnapshot(
-            startDate: dates.first ?? now,
-            endDate: dates.last ?? now,
+            startDate: declaredStart ?? dates.first ?? now,
+            endDate: declaredEnd ?? dates.last ?? now,
             prescribedMiles: plan?.prescribedMiles ?? days.compactMap(\.plannedRunMiles).reduce(0, +),
             days: days
         )
