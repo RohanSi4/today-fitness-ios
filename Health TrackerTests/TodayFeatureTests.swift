@@ -835,6 +835,35 @@ struct WeeklyTrainingSnapshotTests {
         #expect(state.plannedSets == 4)
     }
 
+    /// Sets alone cannot say how much of the session is left: 8 of 17 is a very
+    /// different workout with two movements to go than with five.
+    @Test func theWidgetKnowsWhichMovementOfTheSessionHeIsOn() throws {
+        let start = try #require(date("2026-07-22T18:00:00Z"))
+        let workout = TodayWidgetWorkout(
+            title: "Upper A workout",
+            startedAt: start,
+            lastSetAt: start.addingTimeInterval(600),
+            nextExercise: "Pec deck",
+            completedSets: 8,
+            plannedSets: 17,
+            exerciseIndex: 3,
+            exerciseCount: 7
+        )
+        #expect(workout.exercisePosition == "3 of 7")
+
+        // A payload from the build before these fields existed must still decode,
+        // and must not invent a position it does not have.
+        let older = TodayWidgetWorkout(
+            title: "Upper A workout",
+            startedAt: start,
+            lastSetAt: nil,
+            nextExercise: nil,
+            completedSets: 0,
+            plannedSets: 17
+        )
+        #expect(older.exercisePosition == nil)
+    }
+
     /// The clock has to run off the start of the session before the first set is
     /// checked, or the card he opens at the rack shows nothing at all.
     @Test func restAnchorFallsBackToTheStartOfTheSessionBeforeAnySetIsLogged() throws {

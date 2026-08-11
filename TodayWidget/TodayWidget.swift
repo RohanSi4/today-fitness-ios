@@ -66,6 +66,10 @@ private struct TodayWidgetEntryView: View {
                 circular
             case .accessoryRectangular:
                 rectangular
+            case .systemSmall:
+                systemSmall
+            case .systemMedium:
+                systemMedium
             default:
                 rectangular
             }
@@ -135,9 +139,13 @@ private struct TodayWidgetEntryView: View {
                     .font(.headline.monospacedDigit())
                     .lineLimit(1)
                 Spacer(minLength: 5)
-                Text("\(workout.completedSets)/\(workout.plannedSets)")
+                // Sets alone cannot say how much is left: 8 of 17 is a different
+                // session with two movements to go than with five.
+                Text(workout.exercisePosition.map { "\(workout.completedSets)/\(workout.plannedSets) · \($0)" }
+                    ?? "\(workout.completedSets)/\(workout.plannedSets)")
                     .font(.caption2.monospacedDigit().weight(.semibold))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                     .privacySensitive()
             }
             Text(nextLine(for: workout))
@@ -174,15 +182,121 @@ private struct TodayWidgetEntryView: View {
                     .lineLimit(1)
                     .privacySensitive()
             }
-            Text(entry.snapshot.detail)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .privacySensitive()
+            HStack(spacing: 6) {
+                Text(entry.snapshot.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Text("\(entry.snapshot.week.completedRuns)r · \(entry.snapshot.week.completedLifts)l")
+                    .font(.caption2.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .privacySensitive()
             ProgressView(value: weeklyRatio)
                 .privacySensitive()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The Home Screen and CarPlay square. Sized for a glance from arm's length,
+    /// so the clock is the biggest thing on it during a lift.
+    private var systemSmall: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: symbolName)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.tint)
+                Text(workout == nil ? "TODAY" : "REST")
+                    .font(.caption2.weight(.bold))
+                    .tracking(0.8)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
+
+            Spacer(minLength: 4)
+
+            if let workout {
+                Text(workout.restAnchor, style: .timer)
+                    .font(.system(size: 34, weight: .bold, design: .rounded).monospacedDigit())
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+                Text(nextLine(for: workout))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .privacySensitive()
+            } else {
+                Text(entry.snapshot.headline)
+                    .font(.headline)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.7)
+                Text(entry.snapshot.detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .privacySensitive()
+            }
+
+            Spacer(minLength: 6)
+
+            Text(footnote)
+                .font(.caption2.monospacedDigit().weight(.semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .privacySensitive()
+            ProgressView(value: workout?.setRatio ?? weeklyRatio)
+                .tint(.green)
+                .privacySensitive()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+    }
+
+    /// The wide one: the session on the left, the training week on the right,
+    /// because in the car the week is the part he cannot get at a glance
+    /// anywhere else.
+    private var systemMedium: some View {
+        HStack(alignment: .top, spacing: 14) {
+            systemSmall
+            Divider()
+            VStack(alignment: .leading, spacing: 6) {
+                Text("THIS WEEK")
+                    .font(.caption2.weight(.bold))
+                    .tracking(0.8)
+                    .foregroundStyle(.secondary)
+                Text(weeklyMileage)
+                    .font(.title3.monospacedDigit().weight(.bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .privacySensitive()
+                Label("\(entry.snapshot.week.completedRuns) runs", systemImage: "figure.run")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .privacySensitive()
+                Label("\(entry.snapshot.week.completedLifts) lifts", systemImage: "dumbbell.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .privacySensitive()
+                Spacer(minLength: 0)
+                ProgressView(value: weeklyRatio)
+                    .tint(.green)
+                    .privacySensitive()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+    }
+
+    /// The bottom line of the square: how far through the session, or how far
+    /// through the training week.
+    private var footnote: String {
+        guard let workout else { return weeklyMileage }
+        guard let position = workout.exercisePosition else {
+            return "\(workout.completedSets)/\(workout.plannedSets) sets"
+        }
+        return "\(workout.completedSets)/\(workout.plannedSets) sets · \(position)"
     }
 
     private var weeklyRatio: Double {
@@ -214,6 +328,15 @@ struct TodayDailyWidget: Widget {
             .accessoryInline,
             .accessoryCircular,
             .accessoryRectangular,
+            // The Home Screen families are also what CarPlay's dashboard offers:
+            // it lists any widget already on the iPhone, and needs no CarPlay
+            // entitlement to do it — which matters, because Apple grants those
+            // only to Audio, Communication, EV Charging, Navigation, Parking and
+            // Quick Food Ordering apps, and a training app is none of them.
+            // Declaring only the accessory families is why this could not be put
+            // in the car at all.
+            .systemSmall,
+            .systemMedium,
         ])
     }
 }
@@ -403,4 +526,18 @@ struct TodayWidgetBundle: WidgetBundle {
 } timeline: {
     TodayWidgetEntry(date: .now, snapshot: .placeholder)
     TodayWidgetEntry(date: .now, snapshot: .workoutPlaceholder)
+}
+
+#Preview(as: .systemSmall) {
+    TodayDailyWidget()
+} timeline: {
+    TodayWidgetEntry(date: .now, snapshot: .workoutPlaceholder)
+    TodayWidgetEntry(date: .now, snapshot: .placeholder)
+}
+
+#Preview(as: .systemMedium) {
+    TodayDailyWidget()
+} timeline: {
+    TodayWidgetEntry(date: .now, snapshot: .workoutPlaceholder)
+    TodayWidgetEntry(date: .now, snapshot: .placeholder)
 }

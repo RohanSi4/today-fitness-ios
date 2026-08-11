@@ -13,14 +13,26 @@ enum TodayWidgetWorkoutBuilder {
         catalog: ExerciseCatalog
     ) -> TodayWidgetWorkout? {
         guard let session else { return nil }
+        let pending = pendingExerciseIndex(in: session)
         return TodayWidgetWorkout(
             title: session.workoutTitle,
             startedAt: session.startedAt,
             lastSetAt: session.lastCompletedSetAt,
             nextExercise: nextExerciseName(in: session, catalog: catalog),
             completedSets: session.completedSetCount,
-            plannedSets: plannedSetCount(in: session)
+            plannedSets: plannedSetCount(in: session),
+            // One-based, and counted for display: "3 of 7" means two are behind
+            // him. Once everything is down it reads as the last one rather than
+            // running off the end.
+            exerciseIndex: (pending ?? session.exercises.count - 1) + 1,
+            exerciseCount: session.exercises.count
         )
+    }
+
+    private static func pendingExerciseIndex(in session: WorkoutSession) -> Int? {
+        session.exercises.firstIndex { logged in
+            logged.sets.contains { !$0.isPerformed && $0.setType.countsAsWorking }
+        }
     }
 
     /// The first movement still holding an unfinished working set.

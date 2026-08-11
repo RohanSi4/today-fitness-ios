@@ -33,11 +33,25 @@ struct TodayWidgetWorkout: Codable, Equatable {
     let nextExercise: String?
     let completedSets: Int
     let plannedSets: Int
+    /// Which movement of the session he is on, and how many there are. Position
+    /// is the thing a set count cannot tell you: 8 of 17 sets says nothing about
+    /// whether there are two exercises left or five.
+    ///
+    /// Optional so a payload written by the previous build still decodes.
+    var exerciseIndex: Int? = nil
+    var exerciseCount: Int? = nil
 
     /// The clock the rest timer counts up from: the last set if there is one,
     /// otherwise the start of the session, so a workout with nothing logged yet
     /// still shows a moving number instead of a dash.
     var restAnchor: Date { lastSetAt ?? startedAt }
+
+    /// "3 of 7", or nil when the payload predates the field or the session has
+    /// no exercises on it yet.
+    var exercisePosition: String? {
+        guard let exerciseIndex, let exerciseCount, exerciseCount > 0 else { return nil }
+        return "\(exerciseIndex) of \(exerciseCount)"
+    }
 
     var setRatio: Double {
         guard plannedSets > 0 else { return 0 }
@@ -119,7 +133,9 @@ struct TodayWidgetSnapshot: Codable, Equatable {
             lastSetAt: .now.addingTimeInterval(-102),
             nextExercise: "Pec deck",
             completedSets: 8,
-            plannedSets: 17
+            plannedSets: 17,
+            exerciseIndex: 3,
+            exerciseCount: 7
         )
         return snapshot
     }
