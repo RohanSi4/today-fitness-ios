@@ -63,6 +63,23 @@ final class HealthKitManager: HealthDataProviding, BodyWeightHealthStoring, Body
         HKHealthStore.isHealthDataAvailable()
     }
 
+    /// Suppresses every authorization prompt when the UI tests are driving.
+    ///
+    /// The permission sheet is owned by another process and its answer persists
+    /// in the simulator, so a UI test that touches it behaves differently on the
+    /// first run than on the second and is not deterministic at all. The
+    /// screenshot walkthrough spent most of its failures photographing this
+    /// sheet instead of the screens it exists to check, and one late-arriving
+    /// prompt sat over the Today tab for the rest of the run.
+    ///
+    /// Reuses `-useMockData`, which is already the flag the UI tests launch with
+    /// and which `RunningWorkoutService.start()` already gates on. Nothing else
+    /// passes it. Callers see `authorizationDenied`, which is a path the app
+    /// already has to handle correctly and the one the walkthrough wanted to
+    /// photograph anyway.
+    private static let suppressesAuthorizationPrompts =
+        ProcessInfo.processInfo.arguments.contains("-useMockData")
+
     private let store: HKHealthStore
     private let sessionAssembler = SleepSessionAssembler()
 
@@ -107,6 +124,7 @@ final class HealthKitManager: HealthDataProviding, BodyWeightHealthStoring, Body
     }
 
     func requestAuthorization() async throws {
+        if Self.suppressesAuthorizationPrompts { throw HealthKitError.authorizationDenied }
         guard isHealthDataAvailable else {
             throw HealthKitError.healthDataNotAvailable
         }
@@ -136,6 +154,7 @@ final class HealthKitManager: HealthDataProviding, BodyWeightHealthStoring, Body
     }
 
     func requestBodyWeightAuthorization() async throws {
+        if Self.suppressesAuthorizationPrompts { throw HealthKitError.authorizationDenied }
         guard isHealthDataAvailable else {
             throw HealthKitError.healthDataNotAvailable
         }
@@ -157,6 +176,7 @@ final class HealthKitManager: HealthDataProviding, BodyWeightHealthStoring, Body
     }
 
     func requestWorkoutAuthorization() async throws {
+        if Self.suppressesAuthorizationPrompts { throw HealthKitError.authorizationDenied }
         guard isHealthDataAvailable else {
             throw HealthKitError.healthDataNotAvailable
         }

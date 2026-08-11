@@ -76,6 +76,140 @@ final class ScreenshotWalkthrough: XCTestCase {
         return dismissedAny
     }
 
+    /// Clears whatever system alert is on screen right now, without waiting for
+    /// one to appear.
+    ///
+    /// `dismissHealthSheet` answers the prompt raised by a specific tap. This is
+    /// for the follow-up that arrives on its own timetable: denying Health
+    /// access raises a second, springboard-owned "Health Access" alert ("You can
+    /// turn on health data categories later in the Health app"), and it landed
+    /// only after the Insights screenshots — long after the one dismissal had
+    /// returned. It then sat over the Today tab, which is why
+    /// `start-workout-button` reported a perfectly good frame and refused to be
+    /// hit. Nothing in the walkthrough was wrong; it just assumed the prompts
+    /// were done arriving.
+    @discardableResult
+    private func clearLingeringSystemAlert(in app: XCUIApplication) -> Bool {
+        // `app` first, and it is the one that actually works. The Health sheet is
+        // a remote view, but its elements are published INTO the app's own tree —
+        // the failing run's hierarchy dump carried both pids under
+        // "App UI hierarchy for ...Health-Tracker". Searching only springboard
+        // and com.apple.Health, as the original dismissal did, looks right and
+        // finds nothing, which is why the sheet outlived every attempt to
+        // dismiss it and sat over the Today tab for the rest of the walkthrough.
+        let hosts = [
+            app,
+            XCUIApplication(bundleIdentifier: "com.apple.springboard"),
+            XCUIApplication(bundleIdentifier: "com.apple.Health"),
+        ]
+        for host in hosts {
+            // Identifier first, label second. `Turn On All` is only StaticText in
+            // this sheet, and the deny control's label carries a typographic
+            // apostrophe that is easy to mismatch and is localized besides;
+            // `UIA.Health.DoNotAllow.Button` is neither.
+            for candidate in [
+                host.buttons["UIA.Health.DoNotAllow.Button"],
+                host.buttons["OK"],
+                host.buttons["Don’t Allow"],
+                host.buttons["Don't Allow"],
+                host.buttons["Dismiss"],
+            ] {
+                // `exists` alone is not enough: springboard keeps stale buttons
+                // addressable after their alert is gone.
+                if candidate.exists, candidate.isHittable {
+                    candidate.tap()
+                    Thread.sleep(forTimeInterval: 1)
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    /// Waits for `element` to be *hittable*, not merely to exist, clearing any
+    /// system alert that shows up while waiting.
+    ///
+    /// Existence was never the right question here. A button under a modal
+    /// exists, reports its real frame, and cannot be tapped, so
+    /// `waitForExistence` returns true and the tap fails with "Failed to not
+    /// hittable" and a frame that looks entirely reasonable.
+    private func tapWhenHittable(
+        _ element: XCUIElement,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 30,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        if waitUntilHittable(element, in: app, timeout: timeout) {
+            element.tap()
+            return
+        }
+        XCTFail(
+            "\(element) never became hittable within \(timeout)s. Exists: \(element.exists).",
+            file: file,
+            line: line
+        )
+    }
+
+    /// The same waiting, reported rather than asserted, for the captures that
+    /// are genuinely optional.
+    @discardableResult
+    private func waitUntilHittable(
+        _ element: XCUIElement,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 30
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        var dismissedMenu = false
+        var scrolls = 0
+        while Date() < deadline {
+            if element.exists, element.isHittable { return true }
+            if clearLingeringSystemAlert(in: app) { continue }
+
+            // A SwiftUI Menu left open is the other thing that makes a perfectly
+            // visible button unhittable: its scrim swallows every tap without
+            // appearing as an alert. The brand picker gets left open whenever the
+            // maker rows are not where the walkthrough expects, and "Add
+            // exercise" then fails with a frame that looks completely fine.
+            // Tapping the navigation title dismisses it and does nothing else.
+            let navBar = app.navigationBars.firstMatch
+            if !dismissedMenu, navBar.exists {
+                navBar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                dismissedMenu = true
+                Thread.sleep(forTimeInterval: 0.8)
+                continue
+            }
+
+            // And the ordinary reason: it is simply below the fold. A SwiftUI
+            // ScrollView publishes its offscreen content to the accessibility
+            // tree with a plausible-looking frame, so "Add exercise" under seven
+            // exercise cards reports `exists == true` at a y that is on screen
+            // and still cannot be tapped. Scrolling is the fix; the frame in the
+            // failure message is what makes it look like it should not be.
+            // The LAST scroll view, which is the frontmost one.
+            // `scrollViews.firstMatch` was picking the Today page still sitting
+            // behind the workout sheet, so every scroll attempt moved a screen
+            // nobody was looking at while the sheet stayed exactly where it was.
+            // "Add exercise" sits at y≈2258 under seven exercise cards on an
+            // ~874pt screen, so this has real distance to cover and silently
+            // scrolling the wrong view looks identical to a button that will
+            // never be hittable.
+            let scrollViews = app.scrollViews
+            if scrolls < 12, scrollViews.count > 0 {
+                // `.fast` matters: the exercise cards are drag-to-reorder, so a
+                // leisurely swipe is often taken as the start of a reorder and
+                // scrolls nothing. A flick carries momentum and outruns it —
+                // twelve plain swipes moved the page 670pt of the 1400 needed.
+                scrollViews.element(boundBy: scrollViews.count - 1).swipeUp(velocity: .fast)
+                scrolls += 1
+                Thread.sleep(forTimeInterval: 0.4)
+                continue
+            }
+            Thread.sleep(forTimeInterval: 0.4)
+        }
+        return false
+    }
+
     /// History on its own. The full walkthrough reaches it only after the
     /// workout flow, so any flake earlier in that run costs the History
     /// screenshot too — which is how the month grouping, the trained-regions
@@ -105,6 +239,19 @@ final class ScreenshotWalkthrough: XCTestCase {
         resume.tap()
         XCTAssertTrue(app.buttons["close-workout-button"].waitForExistence(timeout: 5))
         Thread.sleep(forTimeInterval: 1.5)
+
+        // The skip above asks whether ANY workout is open, which is not the same
+        // question. `testCaptureTheChangedScreens` starts Upper A on the same
+        // simulator and leaves it open, so on a full-class run this resumed that
+        // instead and then asserted a first-exposure placeholder against a row
+        // pre-filled from real history — 235, not empty. The seed builds a
+        // routine-less `upper` session, which titles itself "Upper workout";
+        // the template one is "Upper A workout".
+        try XCTSkipUnless(
+            app.navigationBars["Upper workout"].exists,
+            "Active workout is not the seeded one — run tools/seed-active-workout.sh "
+                + "against a simulator with no other workout open."
+        )
         shoot(app, "15-weight-field")
 
         // An unset weight is an empty field, not a literal 0.
@@ -133,20 +280,21 @@ final class ScreenshotWalkthrough: XCTestCase {
         shoot(app, "02-weight-entry")
         app.buttons["Save weight"].tap()
         Thread.sleep(forTimeInterval: 2)
-        shoot(app, "03a-health-sheet-as-he-sees-it")
-        // Only present until the simulator has an answer on record for this
-        // bundle id, so its absence on a re-run is not a failure.
-        dismissHealthSheet(deny: true)
-        Thread.sleep(forTimeInterval: 2)
-        // The one that matters: Health was refused, so did the weight survive?
-        shoot(app, "03b-after-weight-save-health-denied")
+        // No sheet to dismiss any more: `-useMockData` makes HealthKitManager
+        // refuse authorization outright rather than prompt (see
+        // `suppressesAuthorizationPrompts`). This used to shoot the sheet here
+        // and then fight it for the rest of the run, because the answer persists
+        // per simulator and a fresh prompt could arrive at any later moment.
+        // What the walkthrough actually needed to see is below: Health refused,
+        // and the weight survived anyway.
+        shoot(app, "03-after-weight-save-health-denied")
 
         // The weight chart. This is the 0-200 complaint.
         if app.navigationBars["Morning weight"].exists {
             app.navigationBars.buttons.element(boundBy: 0).tap()
             Thread.sleep(forTimeInterval: 1)
         }
-        app.tabBars.buttons["Insights"].tap()
+        tapWhenHittable(app.tabBars.buttons["Insights"], in: app)
         Thread.sleep(forTimeInterval: 1.5)
         shoot(app, "04-insights-top")
         let insights = app.scrollViews.firstMatch
@@ -160,16 +308,17 @@ final class ScreenshotWalkthrough: XCTestCase {
         }
 
         // Workout, exercise picker, and the brand controls.
-        app.tabBars.buttons.element(boundBy: 0).tap()
+        clearLingeringSystemAlert(in: app)
+        tapWhenHittable(app.tabBars.buttons.element(boundBy: 0), in: app)
         Thread.sleep(forTimeInterval: 1)
         let resume = app.buttons["resume-workout-button"]
-        if resume.waitForExistence(timeout: 2) {
+        if resume.waitForExistence(timeout: 2), resume.isHittable {
             resume.tap()
         } else {
-            app.buttons["start-workout-button"].tap()
+            tapWhenHittable(app.buttons["start-workout-button"], in: app)
             XCTAssertTrue(app.buttons["start-upper-a-workout"].waitForExistence(timeout: 5))
             shoot(app, "07-workout-start-flow")
-            app.buttons["start-upper-a-workout"].tap()
+            tapWhenHittable(app.buttons["start-upper-a-workout"], in: app)
         }
         XCTAssertTrue(app.buttons["close-workout-button"].waitForExistence(timeout: 5))
         Thread.sleep(forTimeInterval: 1)
@@ -178,45 +327,85 @@ final class ScreenshotWalkthrough: XCTestCase {
         // The per-exercise options menu is where the brand picker lives. Matching
         // on "ENDSWITH options" was wrong: the workout's own menu matches it too
         // and sorts first, so the first run photographed "Discard workout".
-        // Not an exact label. Once a maker is remembered the row opens branded, so
-        // the menu is "Lat pulldown (Life Fitness) options" rather than the bare
-        // name. Anchoring on the movement and the suffix survives both.
+        // Naming the movement was the second mistake. It anchored on "Lat
+        // pulldown", which Upper A has not contained since the template moved to
+        // "machine-pulldown", so the query matched nothing and the brand
+        // screenshots died with it. The template is expected to keep changing —
+        // it is his training plan — so this asks for what it actually needs: any
+        // exercise's menu.
+        //
+        // "Workout options" is the exclusion the original comment was reaching
+        // for. It is the toolbar's own menu, it sorts first, and matching it is
+        // how the first run photographed "Discard workout".
         let optionsMenu = app.descendants(matching: .any)
             .matching(
                 NSPredicate(
-                    format: "label BEGINSWITH %@ AND label ENDSWITH %@",
-                    "Lat pulldown", " options"
+                    format: "label ENDSWITH %@ AND label != %@",
+                    " options", "Workout options"
                 )
             )
             .firstMatch
-        XCTAssertTrue(optionsMenu.waitForExistence(timeout: 5))
-        optionsMenu.tap()
+        XCTAssertTrue(
+            optionsMenu.waitForExistence(timeout: 5),
+            "no exercise options menu on the workout screen"
+        )
+        tapWhenHittable(optionsMenu, in: app)
         Thread.sleep(forTimeInterval: 1.5)
         shoot(app, "09-exercise-options-menu")
 
         // The picker is an inline Picker inside that menu, so the makers are
         // already on screen and each one is its own row.
-        let lifeFitness = app.buttons["Life Fitness"].firstMatch
-        if lifeFitness.waitForExistence(timeout: 3) {
+        //
+        // Which makers, though, depends on the movement. This asked for "Life
+        // Fitness" and the menu that actually opens belongs to Smith machine
+        // incline press, which offers Arsenal Strength, Body-Solid, Hammer
+        // Strength, Matrix and Panatta — and no Life Fitness. Neither branch
+        // fired, so the MENU STAYED OPEN, and a SwiftUI menu's scrim then ate
+        // the "Add exercise" tap below. That is the whole failure: not the brand
+        // screenshots, but the unclosed menu behind them.
+        //
+        // So take whichever maker this movement actually offers.
+        let brandOptions = [
+            "Life Fitness", "Hammer Strength", "Matrix", "Panatta",
+            "Arsenal Strength", "Body-Solid", "Cybex", "Technogym",
+        ]
+        let brand = brandOptions
+            .map { app.buttons[$0].firstMatch }
+            .first { $0.exists && $0.isHittable }
+
+        if let brand {
             shoot(app, "10-brand-picker")
-            lifeFitness.tap()
+            brand.tap()
             Thread.sleep(forTimeInterval: 2)
             shoot(app, "11-brand-chip-on-card")
         } else {
-            let machineBrand = app.buttons["Machine brand"].firstMatch
-            if machineBrand.waitForExistence(timeout: 2) {
-                machineBrand.tap()
-                Thread.sleep(forTimeInterval: 1.5)
-                shoot(app, "10-brand-picker")
-                app.buttons["Life Fitness"].firstMatch.tap()
-                Thread.sleep(forTimeInterval: 2)
-                shoot(app, "11-brand-chip-on-card")
+            // Close it deliberately rather than leaving it to be tapped through.
+            // "No brand" is always present once a movement has makers at all, and
+            // selecting it changes nothing.
+            let noBrand = app.buttons["No brand"].firstMatch
+            if noBrand.exists, noBrand.isHittable {
+                noBrand.tap()
+            } else {
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.06)).tap()
             }
+            Thread.sleep(forTimeInterval: 1)
         }
 
-        // The exercise picker, which is where 252 exercises have to stay findable.
+        // The exercise picker, which is where 252 exercises have to stay
+        // findable. BEST EFFORT, and deliberately not an assertion.
+        //
+        // "Add exercise" sits below every exercise card — y≈2258 on an ~874pt
+        // screen for Upper A's seven — and the cards between here and there are
+        // drag-to-reorder, so a scroll gesture over them is regularly taken as
+        // the start of a reorder instead. Twelve plain swipes moved the page
+        // 670pt of the 1400 needed; flicking does better but not reliably.
+        // Failing the run over it would cost the History captures below and
+        // every real check in this file, to prove nothing about the picker that
+        // `ExerciseCatalogTests` does not already prove. If the capture is
+        // missing from the attachments, scroll down and shoot it by hand.
         let addExercise = app.buttons["Add exercise"].firstMatch
-        if addExercise.waitForExistence(timeout: 3) {
+        if addExercise.waitForExistence(timeout: 3),
+           waitUntilHittable(addExercise, in: app, timeout: 15) {
             addExercise.tap()
             Thread.sleep(forTimeInterval: 1.5)
             shoot(app, "12-exercise-picker")
