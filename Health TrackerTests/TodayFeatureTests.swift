@@ -835,6 +835,88 @@ struct WeeklyTrainingSnapshotTests {
         #expect(state.plannedSets == 4)
     }
 
+    /// The second, larger hole opened in the widget privacy rule.
+    ///
+    /// The idle widget said "Open Today for the private plan" and nothing else,
+    /// which is fine on a Lock Screen he is about to unlock and useless on a
+    /// CarPlay dashboard he cannot — and in the car he is never mid-set, so the
+    /// idle state is the ONLY state that surface ever shows. It now carries the
+    /// coach's own plan line and, after the session, what it came to.
+    ///
+    /// The line that has not moved is load: no weights and no rep counts, here
+    /// or anywhere else in the payload.
+    @Test func theIdleWidgetCarriesTodaysPlanAndWhatTodayCameTo() throws {
+        let calendar = utcCalendar
+        let now = try #require(date("2026-07-22T18:00:00Z"))
+        let week = WeeklyTrainingBuilder.build(
+            plan: samplePlan(todayText: "5 mile run + lower body lift"),
+            runs: [],
+            lifts: [],
+            now: now,
+            calendar: calendar
+        )
+        let snapshot = TodayWidgetPublisher.makeSnapshot(
+            weightLogged: true,
+            day: week.day(for: now, calendar: calendar),
+            week: week,
+            planLine: "5 mile run + lower body lift",
+            recap: TodayWidgetRecap(
+                title: "Lower A",
+                sets: 17,
+                durationLabel: "1h 32m",
+                regions: "Quads · Glutes"
+            ),
+            now: now,
+            calendar: calendar
+        )
+
+        #expect(snapshot.planLine == "5 mile run + lower body lift")
+        #expect(snapshot.recap?.summary == "17 sets · 1h 32m · Quads · Glutes")
+
+        let json = try #require(
+            String(data: JSONEncoder().encode(snapshot), encoding: .utf8)
+        ).lowercased()
+        #expect(json.contains("5 mile run + lower body lift"))
+        #expect(json.contains("quads"))
+        // Load still never leaves the app.
+        #expect(!json.contains("lb"))
+        #expect(!json.contains("reps"))
+        #expect(!json.contains("rir"))
+        #expect(!json.contains("184.4"))
+    }
+
+    /// A plan and a recap both describe the day that just ended, so a rollover
+    /// must drop them. Carrying them would have the widget recommending
+    /// yesterday's lift over breakfast and calling it today's.
+    @Test func aNewDayDropsYesterdaysPlanLineAndRecap() throws {
+        let calendar = utcCalendar
+        let start = try #require(date("2026-07-22T18:00:00Z"))
+        var snapshot = TodayWidgetSnapshot.placeholder
+        snapshot = TodayWidgetSnapshot(
+            generatedAt: start,
+            dateKey: TodayWidgetSnapshot.dayKey(for: start, calendar: calendar),
+            phase: .done,
+            headline: "Done for the day",
+            detail: "Everything is checked off",
+            symbolName: "checkmark.circle.fill",
+            deepLink: try #require(URL(string: "today://history")),
+            week: snapshot.week,
+            weekStartKey: "2026-07-20",
+            weekEndKey: "2026-07-26",
+            planLine: "5 mile run + lower body lift",
+            recap: TodayWidgetRecap(title: "Lower A", sets: 17, durationLabel: "1h 32m", regions: "Quads")
+        )
+
+        let tomorrow = try #require(
+            snapshot.carriedForward(to: start.addingTimeInterval(20 * 3_600), calendar: calendar)
+        )
+        #expect(tomorrow.dateKey == "2026-07-23")
+        #expect(tomorrow.planLine == nil)
+        #expect(tomorrow.recap == nil)
+        // The week's totals still survive, which is what the rollover exists for.
+        #expect(tomorrow.week == snapshot.week)
+    }
+
     /// Sets alone cannot say how much of the session is left: 8 of 17 is a very
     /// different workout with two movements to go than with five.
     @Test func theWidgetKnowsWhichMovementOfTheSessionHeIsOn() throws {

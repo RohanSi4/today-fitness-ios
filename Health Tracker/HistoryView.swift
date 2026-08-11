@@ -219,27 +219,8 @@ struct HistoryView: View {
         }
     }
 
-    /// What a session actually trained, so history answers "when did I last do
-    /// legs" instead of only "when did I lift". Uses the same region rollup the
-    /// training pulse does, and only counts a muscle the exercise really loads.
     private func regionSummary(for session: WorkoutSession) -> String {
-        var load: [TrainingRegion: Double] = [:]
-        for logged in session.exercises {
-            guard let exercise = catalog.exercise(id: logged.exerciseID) else { continue }
-            let sets = logged.sets.filter(\.isWorkingSet).count
-            guard sets > 0 else { continue }
-            for contribution in exercise.muscles where contribution.intensity >= 0.5 {
-                load[TrainingRegion.region(for: contribution.muscle), default: 0] += Double(sets) * contribution.intensity
-            }
-        }
-        // Two, not three: with the day in front of it a third region truncated
-        // mid-word ("Fri 24 · Quads · Calves · Hamstri…"), and the third is the
-        // least informative of the three anyway.
-        return load
-            .sorted { $0.value == $1.value ? $0.key.rawValue < $1.key.rawValue : $0.value > $1.value }
-            .prefix(2)
-            .map(\.key.rawValue)
-            .joined(separator: " · ")
+        WorkoutMuscleCoverage.regionSummary(for: session, catalog: catalog)
     }
 
     private var deletionConfirmation: Binding<Bool> {

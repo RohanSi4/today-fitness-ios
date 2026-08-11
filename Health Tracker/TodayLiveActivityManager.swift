@@ -154,6 +154,19 @@ enum TodayLiveActivityStateBuilder {
             day: day,
             week: week,
             workout: workout,
+            planLine: plan?.days.first {
+                $0.date == TodayWidgetSnapshot.dayKey(for: now, calendar: calendar)
+            }?.text,
+            recap: store.workouts
+                .first { calendar.isDate($0.endedAt ?? $0.startedAt, inSameDayAs: now) }
+                .map { session in
+                    TodayWidgetRecap(
+                        title: session.workoutTitle,
+                        sets: session.completedSetCount,
+                        durationLabel: session.durationLabel,
+                        regions: WorkoutMuscleCoverage.regionSummary(for: session, catalog: catalog)
+                    )
+                },
             now: now,
             calendar: calendar
         )
@@ -207,9 +220,16 @@ enum TodayLiveActivityStateBuilder {
             detail = workout.nextExercise.map { "Next: \($0)" }
                 ?? "\(workout.completedSets) of \(workout.plannedSets) sets down"
             symbolName = "dumbbell.fill"
+        } else if let recap = snapshot.recap {
+            // After the lift, the card becomes the reminder of what it was.
+            headline = "\(recap.title) done"
+            detail = recap.summary
+            symbolName = "checkmark.circle.fill"
         } else {
             headline = snapshot.headline
-            detail = snapshot.detail
+            // The coach's own words beat "Open Today for the private plan",
+            // which is all this could say on a screen he cannot unlock.
+            detail = snapshot.planLine ?? snapshot.detail
             symbolName = snapshot.symbolName
         }
 

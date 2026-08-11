@@ -284,6 +284,7 @@ enum TodayWidgetPublisher {
         plan: TrainingPlan?,
         runs: [RunningWorkoutSummary],
         workout: TodayWidgetWorkout? = nil,
+        catalog: ExerciseCatalog,
         now: Date = .now,
         calendar: Calendar = .current
     ) {
@@ -292,6 +293,7 @@ enum TodayWidgetPublisher {
             plan: plan,
             runs: runs,
             workout: workout,
+            catalog: catalog,
             now: now,
             calendar: calendar
         ) else { return }
@@ -325,6 +327,7 @@ enum TodayWidgetPublisher {
         plan: TrainingPlan?,
         runs: [RunningWorkoutSummary],
         workout: TodayWidgetWorkout? = nil,
+        catalog: ExerciseCatalog,
         now: Date = .now,
         calendar: Calendar = .current
     ) -> TodayWidgetSnapshot? {
@@ -333,6 +336,7 @@ enum TodayWidgetPublisher {
             plan: plan,
             runs: runs,
             workout: workout,
+            catalog: catalog,
             now: now,
             calendar: calendar
         )?.snapshot
@@ -343,6 +347,7 @@ enum TodayWidgetPublisher {
         plan: TrainingPlan?,
         runs: [RunningWorkoutSummary],
         workout: TodayWidgetWorkout?,
+        catalog: ExerciseCatalog,
         now: Date,
         calendar: Calendar
     ) -> (snapshot: TodayWidgetSnapshot, day: WeeklyDaySnapshot?, week: WeeklyTrainingSnapshot)? {
@@ -355,11 +360,29 @@ enum TodayWidgetPublisher {
             calendar: calendar
         )
         let day = week.day(for: now, calendar: calendar)
+        // Resolved with the same local day key the widget uses. Reading it off
+        // `plan.days` in UTC is the bug that had the Today card offering
+        // tomorrow's run every evening.
+        let todayKey = TodayWidgetSnapshot.dayKey(for: now, calendar: calendar)
+        let planLine = plan?.days.first { $0.date == todayKey }?.text
+        let finishedLift = store.workouts.first {
+            calendar.isDate($0.endedAt ?? $0.startedAt, inSameDayAs: now)
+        }
+
         let snapshot = makeSnapshot(
             weightLogged: store.weights.contains { calendar.isDate($0.date, inSameDayAs: now) },
             day: day,
             week: week,
             workout: workout,
+            planLine: planLine,
+            recap: finishedLift.map { session in
+                TodayWidgetRecap(
+                    title: session.workoutTitle,
+                    sets: session.completedSetCount,
+                    durationLabel: session.durationLabel,
+                    regions: WorkoutMuscleCoverage.regionSummary(for: session, catalog: catalog)
+                )
+            },
             now: now,
             calendar: calendar
         )
@@ -371,6 +394,8 @@ enum TodayWidgetPublisher {
         day: WeeklyDaySnapshot?,
         week: WeeklyTrainingSnapshot,
         workout: TodayWidgetWorkout? = nil,
+        planLine: String? = nil,
+        recap: TodayWidgetRecap? = nil,
         now: Date = .now,
         calendar: Calendar = .current
     ) -> TodayWidgetSnapshot {
@@ -399,7 +424,9 @@ enum TodayWidgetPublisher {
             // calendar made Sunday and the next Monday look like one week.
             weekStartKey: TodayWidgetSnapshot.dayKey(for: week.startDate, calendar: calendar),
             weekEndKey: TodayWidgetSnapshot.dayKey(for: week.endDate, calendar: calendar),
-            workout: workout
+            workout: workout,
+            planLine: planLine,
+            recap: recap
         )
     }
 

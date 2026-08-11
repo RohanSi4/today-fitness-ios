@@ -65,11 +65,11 @@ struct StoreDataSafetyTests {
 
         try makeUnreadable(url)
         let locked = TodayStore(storageURL: url, calendar: utcCalendar)
-        #expect(TodayWidgetPublisher.makeSnapshot(store: locked, plan: nil, runs: []) == nil)
+        #expect(TodayWidgetPublisher.makeSnapshot(store: locked, plan: nil, runs: [], catalog: ExerciseCatalog()) == nil)
 
         try makeReadable(url)
         let readable = TodayStore(storageURL: url, calendar: utcCalendar)
-        #expect(TodayWidgetPublisher.makeSnapshot(store: readable, plan: nil, runs: []) != nil)
+        #expect(TodayWidgetPublisher.makeSnapshot(store: readable, plan: nil, runs: [], catalog: ExerciseCatalog()) != nil)
     }
 
     @Test func oneUnreadableEntryDoesNotTakeTheWholeArchiveWithIt() throws {

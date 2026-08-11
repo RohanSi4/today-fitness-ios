@@ -73,6 +73,30 @@ struct TodayWidgetWorkout: Codable, Equatable {
     }
 }
 
+/// What he actually did today, for the widget to hand back as a reminder.
+///
+/// The idle widget used to say "Open Today for the private plan" and nothing
+/// else, which is fine on a Lock Screen he is about to unlock and useless on a
+/// CarPlay dashboard he cannot. In the car he is never mid-set, so the two
+/// states that matter are the two this and `planLine` cover: what is on today,
+/// and what today's session came to.
+struct TodayWidgetRecap: Codable, Equatable {
+    let title: String
+    let sets: Int
+    let durationLabel: String?
+    /// "Chest · Back", from the same region rollup History shows.
+    let regions: String?
+
+    /// "17 sets · 1h 32m · Chest · Back", dropping whatever is missing rather
+    /// than leaving separators stranded.
+    var summary: String {
+        var parts = ["\(sets) \(sets == 1 ? "set" : "sets")"]
+        if let durationLabel { parts.append(durationLabel) }
+        if let regions, !regions.isEmpty { parts.append(regions) }
+        return parts.joined(separator: " · ")
+    }
+}
+
 struct TodayWidgetSnapshot: Codable, Equatable {
     static let appGroupIdentifier = "group.rohansingh.today"
     static let defaultsKey = "today-widget-snapshot-v2"
@@ -105,6 +129,12 @@ struct TodayWidgetSnapshot: Codable, Equatable {
     /// keys: a payload written by an older build has to keep decoding.
     var workout: TodayWidgetWorkout?
 
+    /// The coach's own words for today — "4 mile run + upper body lift".
+    var planLine: String?
+
+    /// Today's finished lift, if there is one.
+    var recap: TodayWidgetRecap?
+
     static var placeholder: TodayWidgetSnapshot {
         TodayWidgetSnapshot(
             generatedAt: .now,
@@ -125,6 +155,19 @@ struct TodayWidgetSnapshot: Codable, Equatable {
 
     /// Mid-lift, for the preview canvas. The rest clock only looks right when
     /// the anchor is in the past, so it is offset rather than `.now`.
+    /// After the lift, which is the state the car actually sees.
+    static var recapPlaceholder: TodayWidgetSnapshot {
+        var snapshot = placeholder
+        snapshot.planLine = "4 mile run + upper body lift"
+        snapshot.recap = TodayWidgetRecap(
+            title: "Upper A",
+            sets: 17,
+            durationLabel: "1h 32m",
+            regions: "Chest · Back"
+        )
+        return snapshot
+    }
+
     static var workoutPlaceholder: TodayWidgetSnapshot {
         var snapshot = placeholder
         snapshot.workout = TodayWidgetWorkout(
@@ -228,7 +271,12 @@ struct TodayWidgetSnapshot: Codable, Equatable {
             week: week,
             weekStartKey: weekStartKey,
             weekEndKey: weekEndKey,
-            workout: live
+            workout: live,
+            // Both are strictly about the day that just ended. Carrying them
+            // would have the widget recommending yesterday's lift over breakfast
+            // and calling it today's.
+            planLine: nil,
+            recap: nil
         )
     }
 

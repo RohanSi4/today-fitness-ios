@@ -36,7 +36,8 @@ struct Health_TrackerApp: App {
                     workout: TodayWidgetWorkoutBuilder.make(
                         from: store.activeWorkout,
                         catalog: ExerciseCatalog.shared
-                    )
+                    ),
+                    catalog: ExerciseCatalog.shared
                 )
             }
         }

@@ -151,7 +151,8 @@ struct ContentView: View {
             store: store,
             plan: planService.plan,
             runs: runService.workouts,
-            workout: workout
+            workout: workout,
+            catalog: catalog
         )
     }
 

@@ -6,6 +6,35 @@ enum WorkoutMuscleCoverage {
     /// involve the biceps without replacing the curl that was programmed for them.
     static let directTargetThreshold = 0.75
 
+    /// What a session actually trained, so history answers "when did I last do
+    /// legs" instead of only "when did I lift". Uses the same region rollup the
+    /// training pulse does, and only counts a muscle the exercise really loads.
+    ///
+    /// Lifted out of `HistoryView` when the widget needed the same sentence for
+    /// its post-lift recap. Two regions, not three: with the day in front of it
+    /// a third truncated mid-word ("Fri 24 · Quads · Calves · Hamstri…"), and
+    /// the third is the least informative of them anyway.
+    static func regionSummary(
+        for session: WorkoutSession,
+        catalog: ExerciseCatalog,
+        limit: Int = 2
+    ) -> String {
+        var load: [TrainingRegion: Double] = [:]
+        for logged in session.exercises {
+            guard let exercise = catalog.exercise(id: logged.exerciseID) else { continue }
+            let sets = logged.sets.filter(\.isWorkingSet).count
+            guard sets > 0 else { continue }
+            for contribution in exercise.muscles where contribution.intensity >= 0.5 {
+                load[TrainingRegion.region(for: contribution.muscle), default: 0] += Double(sets) * contribution.intensity
+            }
+        }
+        return load
+            .sorted { $0.value == $1.value ? $0.key.rawValue < $1.key.rawValue : $0.value > $1.value }
+            .prefix(limit)
+            .map(\.key.rawValue)
+            .joined(separator: " · ")
+    }
+
     static func targets(for session: WorkoutSession, catalog: ExerciseCatalog) -> [WorkoutMuscleArea] {
         if let template = session.routineTemplate {
             return template.targetMuscles

@@ -79,6 +79,26 @@ private struct TodayWidgetEntryView: View {
     }
 
     private var workout: TodayWidgetWorkout? { entry.snapshot.workout }
+    private var recap: TodayWidgetRecap? { entry.snapshot.recap }
+
+    /// What this says when no lift is open — which, in the car, is always.
+    ///
+    /// Priority is deliberate: what he has already done outranks what is
+    /// planned, because once the session is logged the plan line is the less
+    /// interesting of the two and he has just asked the widget "how did that
+    /// go". Both beat the old "Open Today for the private plan", which said
+    /// nothing at all on a dashboard he cannot unlock.
+    private var idleHeadline: String {
+        recap.map { "\($0.title) done" } ?? entry.snapshot.headline
+    }
+
+    private var idleDetail: String {
+        recap?.summary ?? entry.snapshot.planLine ?? entry.snapshot.detail
+    }
+
+    private var idleSymbol: String {
+        recap == nil ? entry.snapshot.symbolName : "checkmark.circle.fill"
+    }
 
     /// The inline family has no redaction of its own, so it never names a
     /// movement - only the clock, which gives nothing away.
@@ -91,7 +111,7 @@ private struct TodayWidgetEntryView: View {
                 Image(systemName: "timer")
             }
         } else {
-            Label(entry.snapshot.headline, systemImage: entry.snapshot.symbolName)
+            Label(idleHeadline, systemImage: idleSymbol)
         }
     }
 
@@ -113,7 +133,7 @@ private struct TodayWidgetEntryView: View {
     }
 
     private var symbolName: String {
-        workout == nil ? entry.snapshot.symbolName : "timer"
+        workout == nil ? idleSymbol : "timer"
     }
 
     @ViewBuilder
@@ -172,7 +192,7 @@ private struct TodayWidgetEntryView: View {
             HStack(spacing: 7) {
                 Image(systemName: entry.snapshot.symbolName)
                     .font(.headline.weight(.semibold))
-                Text(entry.snapshot.headline)
+                Text(idleHeadline)
                     .font(.headline)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
@@ -183,10 +203,11 @@ private struct TodayWidgetEntryView: View {
                     .privacySensitive()
             }
             HStack(spacing: 6) {
-                Text(entry.snapshot.detail)
+                Text(idleDetail)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.85)
                 Spacer(minLength: 4)
                 Text("\(entry.snapshot.week.completedRuns)r · \(entry.snapshot.week.completedLifts)l")
                     .font(.caption2.monospacedDigit().weight(.semibold))
@@ -208,7 +229,7 @@ private struct TodayWidgetEntryView: View {
                 Image(systemName: symbolName)
                     .font(.caption.weight(.bold))
                     .foregroundStyle(.tint)
-                Text(workout == nil ? "TODAY" : "REST")
+                Text(workout != nil ? "REST" : (recap == nil ? "TODAY" : "DONE"))
                     .font(.caption2.weight(.bold))
                     .tracking(0.8)
                     .foregroundStyle(.secondary)
@@ -229,14 +250,15 @@ private struct TodayWidgetEntryView: View {
                     .minimumScaleFactor(0.8)
                     .privacySensitive()
             } else {
-                Text(entry.snapshot.headline)
+                Text(idleHeadline)
                     .font(.headline)
                     .lineLimit(2)
                     .minimumScaleFactor(0.7)
-                Text(entry.snapshot.detail)
+                Text(idleDetail)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    .lineLimit(3)
+                    .minimumScaleFactor(0.8)
                     .privacySensitive()
             }
 
@@ -532,12 +554,14 @@ struct TodayWidgetBundle: WidgetBundle {
     TodayDailyWidget()
 } timeline: {
     TodayWidgetEntry(date: .now, snapshot: .workoutPlaceholder)
+    TodayWidgetEntry(date: .now, snapshot: .recapPlaceholder)
     TodayWidgetEntry(date: .now, snapshot: .placeholder)
 }
 
 #Preview(as: .systemMedium) {
     TodayDailyWidget()
 } timeline: {
+    TodayWidgetEntry(date: .now, snapshot: .recapPlaceholder)
     TodayWidgetEntry(date: .now, snapshot: .workoutPlaceholder)
     TodayWidgetEntry(date: .now, snapshot: .placeholder)
 }
