@@ -70,14 +70,17 @@ struct ContentView: View {
             handleIntentRoute(intentRouter.route)
             await runService.start()
             publishWidgetSnapshot()
+            syncLiveActivity(ensuring: true)
             if coachSync.isConnected, coachSync.hasPendingChanges {
                 await store.syncWithCoach()
             }
         }
         .onChange(of: store.weights) { _, _ in publishWidgetSnapshot() }
         .onChange(of: store.workouts) { _, _ in publishWidgetSnapshot() }
-        .onChange(of: store.activeWorkout) { _, _ in
-            syncLiveActivity()
+        .onChange(of: store.activeWorkout) { previous, updated in
+            // Starting a lift is the moment the card earns its place, so that
+            // transition adds it rather than waiting to be asked.
+            syncLiveActivity(ensuring: previous == nil && updated != nil)
             publishWidgetSnapshot(onlyIfWorkoutChanged: true)
         }
         .onChange(of: planService.plan) { _, _ in publishWidgetSnapshot() }
@@ -107,6 +110,9 @@ struct ContentView: View {
                     async let plan: Void = planService.refresh()
                     _ = await (runs, plan)
                     publishWidgetSnapshot()
+                    // Re-arms the card after iOS has expired it, which it does
+                    // after roughly 8 hours no matter what the app wants.
+                    syncLiveActivity(ensuring: true)
                     if coachSync.isConnected, coachSync.hasPendingChanges {
                         await store.syncWithCoach()
                     }
@@ -149,7 +155,11 @@ struct ContentView: View {
         )
     }
 
-    private func syncLiveActivity() {
+    /// - Parameter ensuring: add the card if it is not there, rather than only
+    ///   updating one already on screen. Set on launch, on foreground, and when
+    ///   a workout starts — the moments where he wants it standing and would
+    ///   otherwise have had to pin it by hand.
+    private func syncLiveActivity(ensuring: Bool = false) {
         guard let state = TodayLiveActivityStateBuilder.make(
             store: store,
             plan: planService.plan,
@@ -157,7 +167,11 @@ struct ContentView: View {
             catalog: catalog
         ) else { return }
         Task {
-            await TodayLiveActivityManager.shared.updateIfPresented(with: state)
+            if ensuring {
+                await TodayLiveActivityManager.shared.ensurePresented(state)
+            } else {
+                await TodayLiveActivityManager.shared.updateIfPresented(with: state)
+            }
         }
     }
 }

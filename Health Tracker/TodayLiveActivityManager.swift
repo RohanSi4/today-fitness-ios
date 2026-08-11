@@ -10,7 +10,50 @@ final class TodayLiveActivityManager: ObservableObject {
     @Published private(set) var isUpdating = false
     @Published private(set) var errorMessage: String?
 
+    /// Set only by tapping "Remove from Lock Screen", and the one thing that
+    /// stops the card coming back on its own.
+    ///
+    /// Without it, `ensurePresented` would re-add the card the moment the app
+    /// next came forward, which turns an explicit dismissal into a bug that
+    /// looks like the app ignoring him.
+    private static let optedOutKey = "today-live-activity-opted-out"
+    private var hasOptedOut: Bool {
+        get { UserDefaults.standard.bool(forKey: Self.optedOutKey) }
+        set { UserDefaults.standard.set(newValue, forKey: Self.optedOutKey) }
+    }
+
     private init() {
+        refreshPresence()
+    }
+
+    /// Puts the card on the Lock Screen without being asked, and puts it back
+    /// after iOS has taken it away.
+    ///
+    /// It used to appear only if he tapped "Pin today to Lock Screen" and then
+    /// ended itself as soon as the day's work was done, so the surface he
+    /// actually wanted mid-workout was the one least likely to be there. This
+    /// runs on launch, on foreground, and whenever a workout starts.
+    ///
+    /// **iOS caps a Live Activity at roughly 8 hours** and there is no API to
+    /// extend that, so "forever" is not something this can promise — the
+    /// re-arm on foreground is what makes it feel permanent. The Lock Screen
+    /// *widget* is the surface with no expiry at all.
+    func ensurePresented(_ state: TodaySessionAttributes.ContentState) async {
+        guard !hasOptedOut else { return }
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+
+        if !Activity<TodaySessionAttributes>.activities.isEmpty {
+            await updateIfPresented(with: state)
+            return
+        }
+
+        // Silent on failure, unlike `present`. This was not asked for at this
+        // moment, so it has no business raising an error into the Today screen.
+        _ = try? Activity.request(
+            attributes: TodaySessionAttributes(),
+            content: content(for: state),
+            pushType: nil
+        )
         refreshPresence()
     }
 
@@ -21,6 +64,7 @@ final class TodayLiveActivityManager: ObservableObject {
     func present(_ state: TodaySessionAttributes.ContentState) async {
         errorMessage = nil
         isUpdating = true
+        hasOptedOut = false
         defer { isUpdating = false }
 
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
@@ -53,14 +97,12 @@ final class TodayLiveActivityManager: ObservableObject {
         }
 
         for activity in Activity<TodaySessionAttributes>.activities {
-            if state.phase == .done {
-                await activity.end(
-                    content(for: state),
-                    dismissalPolicy: .after(Date().addingTimeInterval(30 * 60))
-                )
-            } else {
-                await activity.update(content(for: state))
-            }
+            // Finishing the day used to end the card half an hour later. That is
+            // defensible on its own and wrong next to a card he wants standing:
+            // the day goes `.done` most evenings, so the thing kept retiring
+            // itself and having to be re-pinned by hand. Only "Remove from Lock
+            // Screen" ends it now.
+            await activity.update(content(for: state))
         }
         refreshPresence()
     }
@@ -68,6 +110,7 @@ final class TodayLiveActivityManager: ObservableObject {
     func remove() async {
         errorMessage = nil
         isUpdating = true
+        hasOptedOut = true
         defer { isUpdating = false }
 
         for activity in Activity<TodaySessionAttributes>.activities {
