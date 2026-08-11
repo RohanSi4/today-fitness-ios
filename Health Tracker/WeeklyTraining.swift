@@ -283,6 +283,7 @@ enum TodayWidgetPublisher {
         store: TodayStore,
         plan: TrainingPlan?,
         runs: [RunningWorkoutSummary],
+        workout: TodayWidgetWorkout? = nil,
         now: Date = .now,
         calendar: Calendar = .current
     ) {
@@ -290,6 +291,7 @@ enum TodayWidgetPublisher {
             store: store,
             plan: plan,
             runs: runs,
+            workout: workout,
             now: now,
             calendar: calendar
         ) else { return }
@@ -305,7 +307,7 @@ enum TodayWidgetPublisher {
             snapshot: snapshot,
             day: publication.day,
             week: publication.week,
-            activeWorkout: store.activeWorkout,
+            workout: workout,
             now: now
         )
         Task {
@@ -322,6 +324,7 @@ enum TodayWidgetPublisher {
         store: TodayStore,
         plan: TrainingPlan?,
         runs: [RunningWorkoutSummary],
+        workout: TodayWidgetWorkout? = nil,
         now: Date = .now,
         calendar: Calendar = .current
     ) -> TodayWidgetSnapshot? {
@@ -329,6 +332,7 @@ enum TodayWidgetPublisher {
             store: store,
             plan: plan,
             runs: runs,
+            workout: workout,
             now: now,
             calendar: calendar
         )?.snapshot
@@ -338,6 +342,7 @@ enum TodayWidgetPublisher {
         store: TodayStore,
         plan: TrainingPlan?,
         runs: [RunningWorkoutSummary],
+        workout: TodayWidgetWorkout?,
         now: Date,
         calendar: Calendar
     ) -> (snapshot: TodayWidgetSnapshot, day: WeeklyDaySnapshot?, week: WeeklyTrainingSnapshot)? {
@@ -354,6 +359,7 @@ enum TodayWidgetPublisher {
             weightLogged: store.weights.contains { calendar.isDate($0.date, inSameDayAs: now) },
             day: day,
             week: week,
+            workout: workout,
             now: now,
             calendar: calendar
         )
@@ -364,10 +370,15 @@ enum TodayWidgetPublisher {
         weightLogged: Bool,
         day: WeeklyDaySnapshot?,
         week: WeeklyTrainingSnapshot,
+        workout: TodayWidgetWorkout? = nil,
         now: Date = .now,
         calendar: Calendar = .current
     ) -> TodayWidgetSnapshot {
-        let display = displayState(weightLogged: weightLogged, day: day)
+        // A lift he is standing in the middle of outranks every other prompt.
+        // Without this the Lock Screen still said "Log morning weight" at set
+        // eleven, because the weight really was unlogged.
+        let display = workout.map(displayState(workout:))
+            ?? displayState(weightLogged: weightLogged, day: day)
         return TodayWidgetSnapshot(
             generatedAt: now,
             dateKey: TodayWidgetSnapshot.dayKey(for: now, calendar: calendar),
@@ -387,7 +398,25 @@ enum TodayWidgetPublisher {
             // widget cannot derive this itself, and guessing it from the locale
             // calendar made Sunday and the next Monday look like one week.
             weekStartKey: TodayWidgetSnapshot.dayKey(for: week.startDate, calendar: calendar),
-            weekEndKey: TodayWidgetSnapshot.dayKey(for: week.endDate, calendar: calendar)
+            weekEndKey: TodayWidgetSnapshot.dayKey(for: week.endDate, calendar: calendar),
+            workout: workout
+        )
+    }
+
+    /// The prompt for a session already under way.
+    ///
+    /// `detail` stays generic here: the rectangular widget renders the movement
+    /// itself, behind `privacySensitive`, and this string is the one the inline
+    /// family shows with no redaction available to it.
+    private static func displayState(
+        workout: TodayWidgetWorkout
+    ) -> (phase: TodayWidgetPhase, headline: String, detail: String, symbol: String, deepLink: URL) {
+        (
+            .remaining,
+            workout.title,
+            "\(workout.completedSets) of \(workout.plannedSets) sets down",
+            "dumbbell.fill",
+            URL(string: "today://workout")!
         )
     }
 

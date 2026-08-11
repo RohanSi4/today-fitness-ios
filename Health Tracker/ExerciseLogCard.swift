@@ -85,6 +85,22 @@ struct ExerciseLogCard: View {
                 }
             }
             Spacer()
+            // Expanding was always possible - the collapsed summary is itself
+            // the button - but the only way back down was to finish every set.
+            // A card he is done with, or opened by mistake, had no way to shut.
+            if showingDetails {
+                Button {
+                    withAnimation(.snappy) { showingDetails = false }
+                } label: {
+                    Image(systemName: "chevron.up")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 34, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Collapse \(baseName)")
+            }
             Image(systemName: "line.3.horizontal")
                 .font(.body.weight(.semibold))
                 .foregroundStyle(.tertiary)
@@ -207,7 +223,7 @@ struct ExerciseLogCard: View {
             withAnimation(.snappy) { showingDetails = true }
         } label: {
             HStack {
-                Text(completedSummary)
+                Text(collapsedLine)
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -219,7 +235,23 @@ struct ExerciseLogCard: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(exercise.name) logged, \(completedSummary). Reopen to edit.")
+        .accessibilityLabel(collapsedAccessibilityLabel)
+    }
+
+    /// Collapsing used to only ever happen automatically, once every set was
+    /// down, so the summary could assume there was something to summarise. Now
+    /// that the header can shut a card by hand, it has to say something for a
+    /// card with no completed sets on it.
+    private var collapsedLine: String {
+        if !completedSummary.isEmpty { return completedSummary }
+        let pending = loggedExercise.sets.filter { $0.setType.countsAsWorking }.count
+        return pending == 0 ? "No sets" : "\(pending) \(pending == 1 ? "set" : "sets") to go"
+    }
+
+    private var collapsedAccessibilityLabel: String {
+        completedSummary.isEmpty
+            ? "\(exercise.name), \(collapsedLine). Reopen to log."
+            : "\(exercise.name) logged, \(completedSummary). Reopen to edit."
     }
 
     /// The chosen maker, shown only once there is one, and itself the control

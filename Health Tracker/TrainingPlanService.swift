@@ -29,9 +29,24 @@ final class TrainingPlanService: ObservableObject {
         loadCache()
     }
 
-    var today: TrainingPlanDay? {
+    var today: TrainingPlanDay? { day(on: Date()) }
+
+    /// The plan row for a calendar day *on this device*.
+    ///
+    /// This used to format the date with `dayFormatter`, which is pinned to GMT
+    /// on purpose: the plausibility bounds below do pure key arithmetic and must
+    /// not drift with the zone. Borrowing it here meant the Today card rolled
+    /// over to tomorrow's workout the instant UTC did - 5pm Pacific, 8pm Eastern
+    /// - so an evening session was shown the next day's run while the Lock
+    /// Screen widget, the week view and the watch hand-off, all of which resolve
+    /// the day through `Calendar.current`, still showed the right one.
+    ///
+    /// `TodayWidgetSnapshot.dayKey` is the shared spelling of that resolution,
+    /// and it reads the calendar per call rather than freezing a formatter's
+    /// zone for the life of the process.
+    func day(on date: Date, calendar: Calendar = .current) -> TrainingPlanDay? {
         guard let plan else { return nil }
-        let key = Self.dayFormatter.string(from: Date())
+        let key = TodayWidgetSnapshot.dayKey(for: date, calendar: calendar)
         return plan.days.first { $0.date == key }
     }
 

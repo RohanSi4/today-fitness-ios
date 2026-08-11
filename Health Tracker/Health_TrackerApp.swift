@@ -25,10 +25,18 @@ struct Health_TrackerApp: App {
             Task { @MainActor in
                 let runs = RunningWorkoutService.shared
                 await runs.refresh()
+                let store = TodayStore.shared
                 TodayWidgetPublisher.publish(
-                    store: TodayStore.shared,
+                    store: store,
                     plan: TrainingPlanService.shared.plan,
-                    runs: runs.workouts
+                    runs: runs.workouts,
+                    // Rebuilt rather than omitted: a watch run syncing mid-lift
+                    // publishes from here, and passing nil would blank the rest
+                    // timer off the Lock Screen in the middle of the session.
+                    workout: TodayWidgetWorkoutBuilder.make(
+                        from: store.activeWorkout,
+                        catalog: ExerciseCatalog.shared
+                    )
                 )
             }
         }

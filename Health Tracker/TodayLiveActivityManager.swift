@@ -92,6 +92,7 @@ enum TodayLiveActivityStateBuilder {
         store: TodayStore,
         plan: TrainingPlan?,
         runs: [RunningWorkoutSummary],
+        catalog: ExerciseCatalog,
         now: Date = .now,
         calendar: Calendar = .current
     ) -> TodaySessionAttributes.ContentState? {
@@ -104,10 +105,12 @@ enum TodayLiveActivityStateBuilder {
             calendar: calendar
         )
         let day = week.day(for: now, calendar: calendar)
+        let workout = TodayWidgetWorkoutBuilder.make(from: store.activeWorkout, catalog: catalog)
         let snapshot = TodayWidgetPublisher.makeSnapshot(
             weightLogged: store.weights.contains { calendar.isDate($0.date, inSameDayAs: now) },
             day: day,
             week: week,
+            workout: workout,
             now: now,
             calendar: calendar
         )
@@ -115,7 +118,7 @@ enum TodayLiveActivityStateBuilder {
             snapshot: snapshot,
             day: day,
             week: week,
-            activeWorkout: store.activeWorkout,
+            workout: workout,
             now: now
         )
     }
@@ -124,7 +127,7 @@ enum TodayLiveActivityStateBuilder {
         snapshot: TodayWidgetSnapshot,
         day: WeeklyDaySnapshot?,
         week: WeeklyTrainingSnapshot,
-        activeWorkout: WorkoutSession?,
+        workout: TodayWidgetWorkout?,
         now: Date = .now
     ) -> TodaySessionAttributes.ContentState {
         var tasks: [TodayActivityTask] = []
@@ -156,10 +159,10 @@ enum TodayLiveActivityStateBuilder {
         let headline: String
         let detail: String
         let symbolName: String
-        if let active = activeWorkout {
-            headline = "\(active.workoutTitle) in progress"
-            let sets = active.completedSetCount
-            detail = "\(sets) working \(sets == 1 ? "set" : "sets") checked off"
+        if let workout {
+            headline = "\(workout.title) in progress"
+            detail = workout.nextExercise.map { "Next: \($0)" }
+                ?? "\(workout.completedSets) of \(workout.plannedSets) sets down"
             symbolName = "dumbbell.fill"
         } else {
             headline = snapshot.headline
@@ -168,7 +171,7 @@ enum TodayLiveActivityStateBuilder {
         }
 
         let phase: TodayWidgetPhase
-        if activeWorkout != nil {
+        if workout != nil {
             phase = .remaining
         } else if !tasks.isEmpty && tasks.allSatisfy(\.isComplete) {
             phase = .done
@@ -184,7 +187,11 @@ enum TodayLiveActivityStateBuilder {
             symbolName: symbolName,
             tasks: Array(tasks.prefix(3)),
             completedMiles: week.completedMiles,
-            plannedMiles: week.prescribedMiles
+            plannedMiles: week.prescribedMiles,
+            restAnchor: workout?.restAnchor,
+            nextExercise: workout?.nextExercise,
+            completedSets: workout?.completedSets ?? 0,
+            plannedSets: workout?.plannedSets ?? 0
         )
     }
 

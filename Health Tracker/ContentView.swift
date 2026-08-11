@@ -10,6 +10,9 @@ struct ContentView: View {
     @StateObject private var coachSync = CoachSyncService.shared
     @StateObject private var runService = RunningWorkoutService.shared
     @ObservedObject private var intentRouter = TodayIntentRouter.shared
+    /// The last workout payload actually handed to WidgetKit, so a redundant
+    /// push can be recognised as redundant. See `publishWidgetSnapshot`.
+    @State private var publishedWorkout: TodayWidgetWorkout?
 
     var body: some View {
         TabView(selection: $appState.selectedTab) {
@@ -73,7 +76,10 @@ struct ContentView: View {
         }
         .onChange(of: store.weights) { _, _ in publishWidgetSnapshot() }
         .onChange(of: store.workouts) { _, _ in publishWidgetSnapshot() }
-        .onChange(of: store.activeWorkout) { _, _ in syncLiveActivity() }
+        .onChange(of: store.activeWorkout) { _, _ in
+            syncLiveActivity()
+            publishWidgetSnapshot(onlyIfWorkoutChanged: true)
+        }
         .onChange(of: planService.plan) { _, _ in publishWidgetSnapshot() }
         .onChange(of: runService.workouts) { _, _ in publishWidgetSnapshot() }
         .onOpenURL { url in
@@ -122,11 +128,24 @@ struct ContentView: View {
         intentRouter.consume()
     }
 
-    private func publishWidgetSnapshot() {
+    /// - Parameter onlyIfWorkoutChanged: set by the `activeWorkout` observer,
+    ///   which fires on every keystroke in a weight field. Each of those would
+    ///   otherwise spend a slice of the widget's reload budget redrawing an
+    ///   identical Lock Screen, so that path pushes only when a field the widget
+    ///   actually renders has moved - roughly once per checked set. Every other
+    ///   caller is already rare and publishes unconditionally.
+    private func publishWidgetSnapshot(onlyIfWorkoutChanged: Bool = false) {
+        let workout = TodayWidgetWorkoutBuilder.make(
+            from: store.activeWorkout,
+            catalog: catalog
+        )
+        if onlyIfWorkoutChanged, workout == publishedWorkout { return }
+        publishedWorkout = workout
         TodayWidgetPublisher.publish(
             store: store,
             plan: planService.plan,
-            runs: runService.workouts
+            runs: runService.workouts,
+            workout: workout
         )
     }
 
@@ -134,7 +153,8 @@ struct ContentView: View {
         guard let state = TodayLiveActivityStateBuilder.make(
             store: store,
             plan: planService.plan,
-            runs: runService.workouts
+            runs: runService.workouts,
+            catalog: catalog
         ) else { return }
         Task {
             await TodayLiveActivityManager.shared.updateIfPresented(with: state)

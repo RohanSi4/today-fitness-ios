@@ -23,7 +23,18 @@ private struct TodayWidgetProvider: TimelineProvider {
         let now = Date()
         let snapshot = TodayWidgetSnapshot.load() ?? .fallback
         let entry = TodayWidgetEntry(date: now, snapshot: snapshot)
-        completion(Timeline(entries: [entry], policy: .after(nextRefresh(after: now))))
+        completion(Timeline(entries: [entry], policy: .after(refreshDate(for: snapshot, after: now))))
+    }
+
+    /// While a lift is open the app pushes a reload on every checked set, so the
+    /// only reload the timeline itself has to book is the one that retires a
+    /// session he never finished. Scheduling it for the exact staleness deadline
+    /// costs one extra refresh instead of the dozens a polling cadence would.
+    private func refreshDate(for snapshot: TodayWidgetSnapshot, after date: Date) -> Date {
+        let scheduled = nextRefresh(after: date)
+        guard let workout = snapshot.workout else { return scheduled }
+        let expiry = workout.restAnchor.addingTimeInterval(TodayWidgetWorkout.staleAfter)
+        return min(scheduled, max(expiry, date.addingTimeInterval(60)))
     }
 
     private func nextRefresh(after date: Date) -> Date {
@@ -50,14 +61,9 @@ private struct TodayWidgetEntryView: View {
         Group {
             switch family {
             case .accessoryInline:
-                Label(entry.snapshot.headline, systemImage: entry.snapshot.symbolName)
+                inline
             case .accessoryCircular:
-                Gauge(value: weeklyRatio) {
-                    Image(systemName: entry.snapshot.symbolName)
-                } currentValueLabel: {
-                    Image(systemName: entry.snapshot.symbolName)
-                }
-                .gaugeStyle(.accessoryCircularCapacity)
+                circular
             case .accessoryRectangular:
                 rectangular
             default:
@@ -68,7 +74,92 @@ private struct TodayWidgetEntryView: View {
         .containerBackground(.fill.tertiary, for: .widget)
     }
 
+    private var workout: TodayWidgetWorkout? { entry.snapshot.workout }
+
+    /// The inline family has no redaction of its own, so it never names a
+    /// movement - only the clock, which gives nothing away.
+    @ViewBuilder
+    private var inline: some View {
+        if let workout {
+            Label {
+                Text(workout.restAnchor, style: .timer)
+            } icon: {
+                Image(systemName: "timer")
+            }
+        } else {
+            Label(entry.snapshot.headline, systemImage: entry.snapshot.symbolName)
+        }
+    }
+
+    /// Mid-lift the circular gauge tracks sets rather than weekly miles: during
+    /// a session the question is how much of *this* is left.
+    private var circular: some View {
+        Gauge(value: workout?.setRatio ?? weeklyRatio) {
+            Image(systemName: symbolName)
+        } currentValueLabel: {
+            if let workout {
+                Text("\(workout.completedSets)")
+                    .font(.system(.body, design: .rounded).weight(.bold))
+                    .privacySensitive()
+            } else {
+                Image(systemName: symbolName)
+            }
+        }
+        .gaugeStyle(.accessoryCircularCapacity)
+    }
+
+    private var symbolName: String {
+        workout == nil ? entry.snapshot.symbolName : "timer"
+    }
+
+    @ViewBuilder
     private var rectangular: some View {
+        if let workout {
+            workoutRectangular(workout)
+        } else {
+            planRectangular
+        }
+    }
+
+    /// Rest clock, what is up next, and how far through the session he is.
+    ///
+    /// The clock is a `.timer` text rather than a number this extension
+    /// computed: the system re-draws that one on its own every second, which is
+    /// the only thing here that survives the phone staying locked.
+    private func workoutRectangular(_ workout: TodayWidgetWorkout) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 7) {
+                Image(systemName: "timer")
+                    .font(.headline.weight(.semibold))
+                Text(workout.restAnchor, style: .timer)
+                    .font(.headline.monospacedDigit())
+                    .lineLimit(1)
+                Spacer(minLength: 5)
+                Text("\(workout.completedSets)/\(workout.plannedSets)")
+                    .font(.caption2.monospacedDigit().weight(.semibold))
+                    .lineLimit(1)
+                    .privacySensitive()
+            }
+            Text(nextLine(for: workout))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .privacySensitive()
+            ProgressView(value: workout.setRatio)
+                .privacySensitive()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func nextLine(for workout: TodayWidgetWorkout) -> String {
+        guard let next = workout.nextExercise else {
+            return workout.completedSets == 0 ? workout.title : "Last set in"
+        }
+        return "Next: \(next)"
+    }
+
+    private var planRectangular: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 7) {
                 Image(systemName: entry.snapshot.symbolName)
@@ -148,11 +239,30 @@ private struct TodayLiveActivityView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                        .privacySensitive()
                 }
                 Spacer(minLength: 6)
-                Text(weeklyPercent)
-                    .font(.caption.monospacedDigit().weight(.bold))
-                    .foregroundStyle(accent)
+                if let restAnchor = state.restAnchor {
+                    // Mid-lift the weekly percentage is the wrong number to give
+                    // this corner. The clock is what he is looking at the phone
+                    // for, and `.timer` keeps it moving with no push from the
+                    // app - which is the whole point on a locked screen.
+                    VStack(alignment: .trailing, spacing: 0) {
+                        Text(restAnchor, style: .timer)
+                            .font(.callout.monospacedDigit().weight(.bold))
+                            .foregroundStyle(accent)
+                            .lineLimit(1)
+                            .frame(minWidth: 54, alignment: .trailing)
+                        Text("\(state.completedSets)/\(state.plannedSets) sets")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .privacySensitive()
+                    }
+                } else {
+                    Text(weeklyPercent)
+                        .font(.caption.monospacedDigit().weight(.bold))
+                        .foregroundStyle(accent)
+                }
             }
 
             if !state.tasks.isEmpty {
@@ -171,7 +281,7 @@ private struct TodayLiveActivityView: View {
                 .privacySensitive()
             }
 
-            ProgressView(value: weeklyRatio)
+            ProgressView(value: state.restAnchor == nil ? weeklyRatio : setRatio)
                 .tint(accent)
                 .privacySensitive()
         }
@@ -196,6 +306,11 @@ private struct TodayLiveActivityView: View {
         return min(max(state.completedMiles / state.plannedMiles, 0), 1)
     }
 
+    private var setRatio: Double {
+        guard state.plannedSets > 0 else { return 0 }
+        return min(max(Double(state.completedSets) / Double(state.plannedSets), 0), 1)
+    }
+
     private var weeklyPercent: String {
         guard state.plannedMiles > 0 else { return "This week" }
         return weeklyRatio.formatted(.percent.precision(.fractionLength(0)))
@@ -214,8 +329,14 @@ struct TodaySessionLiveActivity: Widget {
                         .foregroundStyle(.green)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    Text(weeklyPercent(for: context.state))
-                        .font(.caption.monospacedDigit().weight(.bold))
+                    if let restAnchor = context.state.restAnchor {
+                        Text(restAnchor, style: .timer)
+                            .font(.caption.monospacedDigit().weight(.bold))
+                            .frame(minWidth: 54, alignment: .trailing)
+                    } else {
+                        Text(weeklyPercent(for: context.state))
+                            .font(.caption.monospacedDigit().weight(.bold))
+                    }
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     VStack(alignment: .leading, spacing: 7) {
@@ -239,8 +360,14 @@ struct TodaySessionLiveActivity: Widget {
                 Image(systemName: context.state.symbolName)
                     .foregroundStyle(.green)
             } compactTrailing: {
-                Text(weeklyPercent(for: context.state))
-                    .font(.caption2.monospacedDigit().weight(.bold))
+                if let restAnchor = context.state.restAnchor {
+                    Text(restAnchor, style: .timer)
+                        .font(.caption2.monospacedDigit().weight(.bold))
+                        .frame(minWidth: 42)
+                } else {
+                    Text(weeklyPercent(for: context.state))
+                        .font(.caption2.monospacedDigit().weight(.bold))
+                }
             } minimal: {
                 Image(systemName: context.state.symbolName)
                     .foregroundStyle(.green)
@@ -275,4 +402,5 @@ struct TodayWidgetBundle: WidgetBundle {
     TodayDailyWidget()
 } timeline: {
     TodayWidgetEntry(date: .now, snapshot: .placeholder)
+    TodayWidgetEntry(date: .now, snapshot: .workoutPlaceholder)
 }

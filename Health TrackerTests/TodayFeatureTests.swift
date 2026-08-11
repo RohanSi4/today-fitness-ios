@@ -777,7 +777,7 @@ struct WeeklyTrainingSnapshotTests {
             snapshot: weightFirstSnapshot,
             day: day,
             week: week,
-            activeWorkout: nil,
+            workout: nil,
             now: now
         )
 
@@ -810,29 +810,98 @@ struct WeeklyTrainingSnapshotTests {
             now: now,
             calendar: calendar
         )
-        let active = WorkoutSession(
-            kind: .lower,
-            startedAt: now,
-            endedAt: nil,
-            exercises: [
-                LoggedExercise(
-                    exerciseID: "leg-extension",
-                    sets: [LoggedSet(weight: 100, reps: 10, isComplete: true)]
-                ),
-            ]
+        let active = TodayWidgetWorkout(
+            title: "Lower workout",
+            startedAt: now.addingTimeInterval(-1_200),
+            lastSetAt: now.addingTimeInterval(-95),
+            nextExercise: "Leg press",
+            completedSets: 1,
+            plannedSets: 4
         )
 
         let state = TodayLiveActivityStateBuilder.make(
             snapshot: snapshot,
             day: day,
             week: week,
-            activeWorkout: active,
+            workout: active,
             now: now
         )
 
         #expect(state.phase == .remaining)
         #expect(state.headline == "Lower workout in progress")
-        #expect(state.detail == "1 working set checked off")
+        #expect(state.detail == "Next: Leg press")
+        #expect(state.restAnchor == active.lastSetAt)
+        #expect(state.completedSets == 1)
+        #expect(state.plannedSets == 4)
+    }
+
+    /// The clock has to run off the start of the session before the first set is
+    /// checked, or the card he opens at the rack shows nothing at all.
+    @Test func restAnchorFallsBackToTheStartOfTheSessionBeforeAnySetIsLogged() throws {
+        let start = try #require(date("2026-07-22T18:00:00Z"))
+        let workout = TodayWidgetWorkout(
+            title: "Upper workout",
+            startedAt: start,
+            lastSetAt: nil,
+            nextExercise: "Incline press",
+            completedSets: 0,
+            plannedSets: 12
+        )
+        #expect(workout.restAnchor == start)
+        #expect(workout.setRatio == 0)
+    }
+
+    /// Nothing but the widget can clear this field, and the widget only runs
+    /// when the Lock Screen is drawn, so an unfinished session has to time out
+    /// on its own rather than tick a rest clock into the hours.
+    @Test func aForgottenWorkoutIsDroppedFromTheWidgetPayloadOnceItGoesStale() throws {
+        let calendar = utcCalendar
+        // Late enough that a plausible session crosses midnight, which is the
+        // case the day-rollover branch used to blank.
+        let start = try #require(date("2026-07-22T22:00:00Z"))
+        let workout = TodayWidgetWorkout(
+            title: "Upper workout",
+            startedAt: start,
+            lastSetAt: start.addingTimeInterval(1_800),
+            nextExercise: "Pec deck",
+            completedSets: 3,
+            plannedSets: 12
+        )
+        let snapshot = TodayWidgetSnapshot(
+            generatedAt: start,
+            dateKey: TodayWidgetSnapshot.dayKey(for: start, calendar: calendar),
+            phase: .remaining,
+            headline: workout.title,
+            detail: "3 of 12 sets down",
+            symbolName: "dumbbell.fill",
+            deepLink: try #require(URL(string: "today://workout")),
+            week: TodayWidgetSnapshot.placeholder.week,
+            weekStartKey: "2026-07-20",
+            weekEndKey: "2026-07-26",
+            workout: workout
+        )
+
+        // Same day, still lifting.
+        let midSession = try #require(
+            snapshot.carriedForward(to: start.addingTimeInterval(3_600), calendar: calendar)
+        )
+        #expect(midSession.workout == workout)
+
+        // Past midnight, still lifting: the prompt rolls over to the morning
+        // weigh-in, the session rides through.
+        let overnight = try #require(
+            snapshot.carriedForward(to: start.addingTimeInterval(2 * 3_600), calendar: calendar)
+        )
+        #expect(overnight.dateKey == "2026-07-23")
+        #expect(overnight.headline == "Log morning weight")
+        #expect(overnight.workout == workout)
+
+        // Never finished. Six and a half hours after the last set, the card must
+        // stop claiming a lift is in progress.
+        let abandoned = try #require(
+            snapshot.carriedForward(to: start.addingTimeInterval(7 * 3_600), calendar: calendar)
+        )
+        #expect(abandoned.workout == nil)
     }
 
     @Test func widgetPayloadCannotContainExactWeightOrExerciseDetails() throws {
@@ -881,13 +950,63 @@ struct WeeklyTrainingSnapshotTests {
         #expect(!normalized.contains("machine-chest-fly"))
         #expect(!normalized.contains("leg-extension"))
         #expect(!normalized.contains("leg extension"))
-        #expect(!normalized.contains("exercise"))
         #expect(!normalized.contains("pounds"))
         #expect(!normalized.contains("lower body lift"))
         #expect(!normalized.contains("5 mile run"))
         #expect(!normalized.contains("10 reps"))
-        #expect(!normalized.contains("1 set"))
         #expect(!normalized.contains("5 mi in 40m"))
+    }
+
+    /// The one hole deliberately opened in the rule above.
+    ///
+    /// Naming the next movement mid-lift is a direct request: between sets the
+    /// thing worth glancing at is what is coming up. The line it must not cross
+    /// is load - a weight on a Lock Screen is the detail that actually matters
+    /// to keep private, and it stays out of the payload entirely. The name is
+    /// rendered behind `privacySensitive`, so a locked phone still redacts it.
+    @Test func anActiveLiftMayNameTheNextMovementButNeverALoad() throws {
+        let calendar = utcCalendar
+        let now = try #require(date("2026-07-22T18:00:00Z"))
+        let plan = samplePlan(todayText: "5 mile run + lower body lift")
+        let week = WeeklyTrainingBuilder.build(
+            plan: plan,
+            runs: [],
+            lifts: [],
+            now: now,
+            calendar: calendar
+        )
+        let day = week.day(for: now, calendar: calendar)
+        let snapshot = TodayWidgetPublisher.makeSnapshot(
+            weightLogged: true,
+            day: day,
+            week: week,
+            workout: TodayWidgetWorkout(
+                title: "Lower workout",
+                startedAt: now.addingTimeInterval(-1_800),
+                lastSetAt: now.addingTimeInterval(-70),
+                nextExercise: "Leg press",
+                completedSets: 3,
+                plannedSets: 12
+            ),
+            now: now,
+            calendar: calendar
+        )
+
+        // The lift outranks every other prompt while it is open.
+        #expect(snapshot.phase == .remaining)
+        #expect(snapshot.headline == "Lower workout")
+        #expect(snapshot.workout?.nextExercise == "Leg press")
+
+        let json = try #require(
+            String(data: JSONEncoder().encode(snapshot), encoding: .utf8)
+        ).lowercased()
+        #expect(json.contains("leg press"))
+        #expect(!json.contains("pounds"))
+        #expect(!json.contains(" lb"))
+        #expect(!json.contains("reps"))
+        #expect(!json.contains("rir"))
+        #expect(!json.contains("lower body lift"))
+        #expect(!json.contains("5 mile run"))
     }
 
     @Test func theTimeTrialDayCountsAsDoneOnceTheHardEffortIsRun() throws {
@@ -974,6 +1093,80 @@ struct WeeklyTrainingSnapshotTests {
                 )
             }
         )
+    }
+
+
+    /// The Aug 10 2026 report: the Today card offered the next day's 7-miler all
+    /// evening while the Lock Screen widget and the week view still showed the
+    /// 4-miler he was actually down for.
+    ///
+    /// `today` formatted the clock with the GMT-pinned formatter that the
+    /// plausibility bounds use for key arithmetic, so the card rolled over the
+    /// moment UTC did rather than when his own day ended.
+    @Test func theTodayCardResolvesThePlanDayInTheDeviceZoneNotUTC() throws {
+        let plan = TrainingPlan(
+            weekStart: "2026-08-10",
+            weekEnd: "2026-08-16",
+            prescribedMiles: 38,
+            days: [
+                TrainingPlanDay(
+                    date: "2026-08-10",
+                    dayLabel: "Mon 8/10",
+                    text: "4 mile run + upper body lift",
+                    isKeyDay: false,
+                    details: []
+                ),
+                TrainingPlanDay(
+                    date: "2026-08-11",
+                    dayLabel: "Tue 8/11",
+                    text: "7 mile run",
+                    isKeyDay: true,
+                    details: []
+                ),
+            ]
+        )
+        let cacheURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("plan-zone-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: cacheURL) }
+        let envelope = try JSONSerialization.data(withJSONObject: [
+            "generatedAt": "2026-08-10T12:00:00Z",
+            "trainingPlan": [
+                "weekStart": plan.weekStart,
+                "weekEnd": plan.weekEnd,
+                "prescribedMiles": plan.prescribedMiles,
+                "days": plan.days.map {
+                    [
+                        "date": $0.date,
+                        "dayLabel": $0.dayLabel,
+                        "text": $0.text,
+                        "isKeyDay": $0.isKeyDay,
+                        "details": $0.details,
+                    ] as [String: Any]
+                },
+            ] as [String: Any],
+        ])
+        try envelope.write(to: cacheURL)
+
+        let service = TrainingPlanService(cacheURL: cacheURL)
+        #expect(service.plan == plan)
+
+        // 21:30 Eastern on Aug 10. UTC has already ticked to Aug 11; he has not.
+        var eastern = Calendar(identifier: .gregorian)
+        eastern.timeZone = try #require(TimeZone(identifier: "America/New_York"))
+        let eveningInEastern = try #require(date("2026-08-11T01:30:00Z"))
+        #expect(
+            service.day(on: eveningInEastern, calendar: eastern)?.text
+                == "4 mile run + upper body lift"
+        )
+
+        // Same instant read in UTC is genuinely the 11th, and must say so.
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = try #require(TimeZone(secondsFromGMT: 0))
+        #expect(service.day(on: eveningInEastern, calendar: utc)?.text == "7 mile run")
+
+        // And the small hours of the 11th in Eastern really are the 11th.
+        let earlyMorning = try #require(date("2026-08-11T06:30:00Z"))
+        #expect(service.day(on: earlyMorning, calendar: eastern)?.text == "7 mile run")
     }
 
     private func samplePlan(todayText: String) -> TrainingPlan {

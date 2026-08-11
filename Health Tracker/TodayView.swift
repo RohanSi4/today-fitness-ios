@@ -84,7 +84,8 @@ struct TodayView: View {
                     } else if let state = TodayLiveActivityStateBuilder.make(
                         store: store,
                         plan: planService.plan,
-                        runs: runService.workouts
+                        runs: runService.workouts,
+                        catalog: catalog
                     ) {
                         await liveActivity.present(state)
                     }
