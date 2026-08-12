@@ -154,6 +154,15 @@ struct TodayView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
+                // Only offered when there is a conflict, because a week that
+                // fits has nothing for the coach to decide.
+                if let report = CoachConflictReport.text(for: weeklySnapshot) {
+                    ShareLink(item: report) {
+                        Label("Send conflicts to coach", systemImage: "square.and.arrow.up")
+                            .font(.footnote)
+                    }
+                    .accessibilityIdentifier("send-conflicts-to-coach")
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
