@@ -187,7 +187,11 @@ struct TrainingWindowFitTests {
         )
         let gap = [FreeWindow(start: at(12), end: at(12, 45))]
 
-        #expect(needs.map(\.working) == [30 * 60])
+        // Typed explicitly: an untyped literal against [TimeInterval] compiles
+        // locally and is ambiguous on the CI toolchain.
+        let expectedWorking: [TimeInterval] = [30 * 60]
+
+        #expect(needs.map(\.working) == expectedWorking)
         #expect(TrainingWindowPlanner.fit(needs: needs, windows: gap).isConflict)
     }
 
