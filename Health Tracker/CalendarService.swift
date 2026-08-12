@@ -250,8 +250,12 @@ final class CalendarService: ObservableObject {
     }
 
     private func load(now: Date, calendar: Calendar) async {
-        let start = calendar.startOfDay(for: now)
-        let end = calendar.date(byAdding: .day, value: Self.lookaheadDays, to: start) ?? start
+        let today = calendar.startOfDay(for: now)
+        // One fetch covers both jobs. The forward window answers "where does
+        // this week's training go"; the backward window is what lets schedule
+        // load be joined against training that actually happened.
+        let start = calendar.date(byAdding: .day, value: -Self.historyDays, to: today) ?? today
+        let end = calendar.date(byAdding: .day, value: Self.lookaheadDays, to: today) ?? today
         do {
             days = try await provider.fetchBusy(start: start, end: end, calendar: calendar)
             lastUpdated = .now
@@ -288,6 +292,14 @@ final class CalendarService: ObservableObject {
 
     /// One training week plus today, which is all the week strip can show.
     static let lookaheadDays = 8
+
+    /// How far back to read for `ScheduleLoadAnalysis`.
+    ///
+    /// Eight weeks rather than a full year: the analysis is only meaningful
+    /// against training that can be seen, and Apple Health is read 14 days back
+    /// (`RunningWorkoutService`), so a longer calendar window would widen the
+    /// half of the join that is already the smaller one.
+    static let historyDays = 56
 
     /// False whenever the calendar must not be touched at all.
     ///

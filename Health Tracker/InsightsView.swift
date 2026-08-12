@@ -10,6 +10,7 @@ struct InsightsView: View {
     @ObservedObject var runService: RunningWorkoutService
     let recapDate: Date?
 
+    @StateObject private var calendarService = CalendarService.shared
     @State private var showingRecap = false
     @State private var showingCoachSync = false
     @State private var showingGoalEditor = false
@@ -19,6 +20,7 @@ struct InsightsView: View {
             VStack(spacing: 18) {
                 weeklyTraining
                 trainingPulse
+                scheduleLoad
                 strengthProgress
                 hypertrophyPlan
                 weightProgress
@@ -268,6 +270,40 @@ struct InsightsView: View {
             )
         }
         .buttonStyle(.plain)
+    }
+
+    /// Whether a heavier calendar goes with less training.
+    ///
+    /// Lives in Insights rather than Today on purpose: it is a retrospective
+    /// over weeks, and putting a claim about the last two months next to this
+    /// morning's plan would invite reading it as advice about today.
+    ///
+    /// Renders nothing at all until the sample can carry a sentence. Silence is
+    /// the common case early on and that is correct — a confident line drawn
+    /// from nine days gets repeated, and a silence does not.
+    @ViewBuilder
+    private var scheduleLoad: some View {
+        let sample = ScheduleLoadAnalysis.days(
+            calendarDays: calendarService.days,
+            runs: runService.workouts,
+            lifts: store.workouts
+        )
+
+        if let finding = ScheduleLoadAnalysis.finding(from: sample) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Schedule and training")
+                    .font(.headline)
+                Text(ScheduleLoadAnalysis.sentence(finding))
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+                Text(ScheduleLoadAnalysis.caveat)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(16)
+            .todayCard()
+        }
     }
 
     private var trainingPulse: some View {
