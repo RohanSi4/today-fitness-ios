@@ -5,6 +5,11 @@ struct WeeklySnapshotView: View {
     @ObservedObject var planService: TrainingPlanService
     @ObservedObject var runService: RunningWorkoutService
 
+    /// Which day rows are open, by `dateKey`. A Set rather than a single
+    /// selection so two days can be compared side by side, which is the whole
+    /// reason to open them on a week view.
+    @State private var expandedDays: Set<String> = []
+
     private var snapshot: WeeklyTrainingSnapshot {
         WeeklyTrainingBuilder.build(
             plan: planService.plan,
@@ -29,6 +34,16 @@ struct WeeklySnapshotView: View {
             async let plan: Void = planService.refresh()
             async let runs: Void = runService.refresh()
             _ = await (plan, runs)
+        }
+        .onAppear {
+            // Today opens itself. It is the row he came here for, and making him
+            // tap it every visit is a tax on the common case.
+            guard expandedDays.isEmpty else { return }
+            if let today = snapshot.days.first(where: {
+                Calendar.current.isDateInToday($0.date) && $0.hasCoachDetail
+            }) {
+                expandedDays = [today.dateKey]
+            }
         }
     }
 
@@ -89,7 +104,7 @@ struct WeeklySnapshotView: View {
             Divider()
 
             ForEach(Array(snapshot.days.enumerated()), id: \.element.id) { index, day in
-                weekRow(day)
+                daySection(day)
                 if index < snapshot.days.count - 1 {
                     Divider().padding(.leading, 64)
                 }
@@ -99,7 +114,64 @@ struct WeeklySnapshotView: View {
         .accessibilityIdentifier("weekly-snapshot-table")
     }
 
-    private func weekRow(_ day: WeeklyDaySnapshot) -> some View {
+    /// A day row plus, when open, the coach's own instructions for it.
+    @ViewBuilder
+    private func daySection(_ day: WeeklyDaySnapshot) -> some View {
+        let isOpen = expandedDays.contains(day.dateKey)
+        VStack(spacing: 0) {
+            if day.hasCoachDetail {
+                Button {
+                    withAnimation(.snappy(duration: 0.22)) {
+                        if isOpen { expandedDays.remove(day.dateKey) }
+                        else { expandedDays.insert(day.dateKey) }
+                    }
+                } label: {
+                    weekRow(day, chevron: isOpen ? "chevron.up" : "chevron.down")
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("week-day-\(day.dateKey)")
+                .accessibilityHint(isOpen ? "Hides the plan for this day" : "Shows the plan for this day")
+                if isOpen {
+                    coachDetail(day)
+                }
+            } else {
+                // Nothing to open. A chevron that reveals an empty sheet is worse
+                // than no chevron.
+                weekRow(day, chevron: nil)
+            }
+        }
+    }
+
+    private func coachDetail(_ day: WeeklyDaySnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            if let planText = day.planText, !planText.isEmpty {
+                Text(planText)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+            }
+            ForEach(Array(day.details.enumerated()), id: \.offset) { _, line in
+                HStack(alignment: .firstTextBaseline, spacing: 7) {
+                    Circle()
+                        .fill(TodayPalette.accent.opacity(0.55))
+                        .frame(width: 4, height: 4)
+                        .padding(.top, 5)
+                    Text(line)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.leading, 50)
+        .padding(.bottom, 13)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Plan for \(day.dayLabel)")
+        .accessibilityValue(day.details.joined(separator: ". "))
+    }
+
+    private func weekRow(_ day: WeeklyDaySnapshot, chevron: String?) -> some View {
         HStack(alignment: .top, spacing: 8) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(day.dayLabel)
@@ -123,7 +195,16 @@ struct WeeklySnapshotView: View {
                 complete: day.liftCompleted,
                 planned: day.plannedLift != nil
             )
+
+            Image(systemName: chevron ?? "chevron.down")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.tertiary)
+                .padding(.top, 2)
+                // Held in the layout even when absent, so the three columns do
+                // not shift width between a day with detail and one without.
+                .opacity(chevron == nil ? 0 : 1)
         }
+        .contentShape(Rectangle())
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .background {

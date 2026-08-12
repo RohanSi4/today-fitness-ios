@@ -885,6 +885,55 @@ struct WeeklyTrainingSnapshotTests {
         #expect(!json.contains("184.4"))
     }
 
+    /// The coach has been generating per-day pacing, heart-rate ceilings, routing
+    /// and fuelling all along, and `TrainingPlanService` has been validating them
+    /// on arrival — but nothing carried them past the decoder, so the week view
+    /// could only ever show distance. This is the wire from plan to day row.
+    @Test func theWeekViewCarriesTheCoachsInstructionsForEachDay() throws {
+        let calendar = utcCalendar
+        let now = try #require(date("2026-07-22T18:00:00Z"))
+        let details = [
+            "Keep the long run conversational, with heart rate at or below 148 bpm.",
+            "Target 10:00 to 10:30 per mile (5.7 to 6.0 mph).",
+            "Route this on hills: at least 40 feet of climb per mile.",
+        ]
+        let plan = TrainingPlan(
+            weekStart: "2026-07-20",
+            weekEnd: "2026-07-26",
+            prescribedMiles: 40,
+            days: [
+                TrainingPlanDay(
+                    date: "2026-07-22",
+                    dayLabel: "Wed 7/22",
+                    text: "14 mile long run",
+                    isKeyDay: true,
+                    details: details
+                )
+            ]
+        )
+        let week = WeeklyTrainingBuilder.build(
+            plan: plan, runs: [], lifts: [], now: now, calendar: calendar
+        )
+        let day = try #require(week.day(for: now, calendar: calendar))
+        #expect(day.planText == "14 mile long run")
+        #expect(day.details == details)
+        #expect(day.hasCoachDetail)
+    }
+
+    /// A day the coach said nothing about must not offer a chevron that opens
+    /// onto an empty sheet.
+    @Test func aDayWithNoCoachInstructionsHasNothingToExpand() throws {
+        let calendar = utcCalendar
+        let now = try #require(date("2026-07-22T18:00:00Z"))
+        let week = WeeklyTrainingBuilder.build(
+            plan: nil, runs: [], lifts: [], now: now, calendar: calendar
+        )
+        let day = try #require(week.day(for: now, calendar: calendar))
+        #expect(day.details.isEmpty)
+        #expect(day.planText == nil)
+        #expect(!day.hasCoachDetail)
+    }
+
     /// The bug this covers: on 2026-08-11 he ran the prescribed 7 miles and the
     /// Lock Screen went on reciting "THRESHOLD SESSION #2, 7mi total" all
     /// evening. `recap` only ever knew about lifts, and the widget renders
