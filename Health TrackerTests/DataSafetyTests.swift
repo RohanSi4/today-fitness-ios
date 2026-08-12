@@ -1,3 +1,4 @@
+import EventKit
 import Foundation
 import CryptoKit
 import Testing
@@ -705,5 +706,126 @@ final class SyncStubState: @unchecked Sendable {
         let current = gate
         lock.unlock()
         current?()
+    }
+}
+
+// MARK: - Calendar
+
+/// The calendar is the most sensitive source the app reads. A job-search
+/// calendar is full of interview titles, the Lock Screen widget renders without
+/// unlocking, and `TodayWidgetSnapshot` carries free text (`headline`, `detail`,
+/// `planLine`) across an App Group. The defence is that the types downstream of
+/// EventKit are structurally incapable of holding a title, so these tests assert
+/// the shape rather than any particular call site remembering to strip it.
+struct CalendarPrivacyTests {
+    private var utcCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar
+    }
+
+    @Test func aBusyIntervalHasNowhereToPutAnEventName() {
+        let interval = BusyInterval(start: .now, end: .now.addingTimeInterval(3_600))
+        let children = Array(Mirror(reflecting: interval).children)
+
+        #expect(children.compactMap(\.label).sorted() == ["end", "start"])
+        // Adding any String-typed field here would give a title a way through.
+        #expect(children.allSatisfy { !($0.value is String) })
+    }
+
+    @Test func aCalendarDayCarriesCountsAndTimesOnly() {
+        let day = CalendarDay(date: .now, busy: [], allDayCount: 2)
+        let children = Array(Mirror(reflecting: day).children)
+
+        #expect(children.compactMap(\.label).sorted() == ["allDayCount", "busy", "date"])
+        #expect(children.allSatisfy { !($0.value is String) })
+    }
+
+    @Test func anEventTitleDoesNotSurviveTheEventKitBoundary() {
+        let store = EKEventStore()
+        let calendar = utcCalendar
+        let day = calendar.date(from: DateComponents(year: 2026, month: 8, day: 13))!
+
+        let secret = "Final round onsite - Stripe"
+        let event = EKEvent(eventStore: store)
+        event.title = secret
+        event.location = "Confidential"
+        event.notes = "Do not leak"
+        event.startDate = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: day)!
+        event.endDate = calendar.date(bySettingHour: 11, minute: 0, second: 0, of: day)!
+
+        let days = EventKitCalendarProvider.days(
+            from: [event],
+            start: day,
+            end: day,
+            calendar: calendar
+        )
+
+        #expect(days.first?.busy.count == 1)
+        // The interval survives; every word of the event does not.
+        #expect(!String(describing: days).contains(secret))
+        #expect(!String(describing: days).contains("Confidential"))
+        #expect(!String(describing: days).contains("Do not leak"))
+    }
+
+    @Test func anAllDayEventIsCountedRatherThanBlockingTheDay() {
+        // The birthdays calendar alone would otherwise mark most of the year
+        // unavailable, and a day-long "Conference" still has a morning in it.
+        let calendar = utcCalendar
+        let day = calendar.date(from: DateComponents(year: 2026, month: 8, day: 13))!
+        let birthday = CalendarEventFacts(
+            start: day,
+            end: calendar.date(byAdding: .day, value: 1, to: day)!,
+            isAllDay: true,
+            holdsTime: true,
+            isCommitment: true
+        )
+
+        let days = EventKitCalendarProvider.days(
+            from: [birthday], start: day, end: day, calendar: calendar
+        )
+
+        #expect(days.first?.busy.isEmpty == true)
+        #expect(days.first?.allDayCount == 1)
+    }
+
+    @Test func anEventMarkedFreeDoesNotHoldTime() {
+        // Marking an event free is the user saying it does not hold their time.
+        // Treating it as busy is how a reminder-style entry eats a training slot.
+        let calendar = utcCalendar
+        let day = calendar.date(from: DateComponents(year: 2026, month: 8, day: 13))!
+        let optional = CalendarEventFacts(
+            start: calendar.date(bySettingHour: 18, minute: 0, second: 0, of: day)!,
+            end: calendar.date(bySettingHour: 21, minute: 0, second: 0, of: day)!,
+            isAllDay: false,
+            holdsTime: false,
+            isCommitment: true
+        )
+
+        let days = EventKitCalendarProvider.days(
+            from: [optional], start: day, end: day, calendar: calendar
+        )
+
+        #expect(days.first?.busy.isEmpty == true)
+    }
+
+    @Test func aDeclinedOrCancelledMeetingIsNotATrainingConflict() {
+        // Counting a meeting he turned down as a conflict is the fastest way to
+        // make the whole feature untrustworthy.
+        let calendar = utcCalendar
+        let day = calendar.date(from: DateComponents(year: 2026, month: 8, day: 13))!
+        let declined = CalendarEventFacts(
+            start: calendar.date(bySettingHour: 9, minute: 0, second: 0, of: day)!,
+            end: calendar.date(bySettingHour: 17, minute: 0, second: 0, of: day)!,
+            isAllDay: false,
+            holdsTime: true,
+            isCommitment: false
+        )
+
+        let days = EventKitCalendarProvider.days(
+            from: [declined], start: day, end: day, calendar: calendar
+        )
+
+        #expect(days.first?.busy.isEmpty == true)
     }
 }

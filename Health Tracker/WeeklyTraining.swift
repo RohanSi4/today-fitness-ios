@@ -128,6 +128,13 @@ struct WeeklyDaySnapshot: Identifiable, Equatable {
     /// them, so the pace guidance only ever existed in the coaching log.
     var details: [String] = []
 
+    /// Whether the day's calendar leaves room for what the coach prescribed.
+    ///
+    /// Defaulted to `.unknown` so every existing construction site, fixture, and
+    /// test keeps compiling, and — more importantly — so a day with no schedule
+    /// attached never reads as "fine." Populated by `withSchedule`.
+    var fit: DayFit = .unknown
+
     /// How much of the prescribed distance counts the run as done.
     ///
     /// This was a flat 0.90, and the Jul 29 5K time trial is exactly why that was
@@ -204,6 +211,46 @@ struct WeeklyTrainingSnapshot: Equatable {
 
     func day(for date: Date, calendar: Calendar = .current) -> WeeklyDaySnapshot? {
         days.first { calendar.isDate($0.date, inSameDayAs: date) }
+    }
+}
+
+extension WeeklyTrainingSnapshot {
+    /// Attach calendar fit to every day.
+    ///
+    /// Kept as a decoration rather than a parameter on `WeeklyTrainingBuilder`
+    /// because the plan and the calendar arrive independently and refresh at
+    /// different rates: the coach publishes weekly, EventKit changes whenever a
+    /// meeting moves. Rebuilding the whole week to re-read a gap would couple
+    /// two things that have no reason to be coupled.
+    func withSchedule(
+        calendarDays: [CalendarDay],
+        recentRuns: [RunningWorkoutSummary],
+        calendar: Calendar = .current
+    ) -> WeeklyTrainingSnapshot {
+        let pace = TrainingWindowPlanner.learnedPace(from: recentRuns)
+        let decorated = days.map { day -> WeeklyDaySnapshot in
+            var copy = day
+            copy.fit = TrainingWindowPlanner.fit(
+                plannedRunMiles: day.plannedRunMiles,
+                plannedLift: day.plannedLift,
+                calendarDay: calendarDays.first { calendar.isDate($0.date, inSameDayAs: day.date) },
+                date: day.date,
+                paceSecondsPerMile: pace,
+                calendar: calendar
+            )
+            return copy
+        }
+        return WeeklyTrainingSnapshot(
+            startDate: startDate,
+            endDate: endDate,
+            prescribedMiles: prescribedMiles,
+            days: decorated
+        )
+    }
+
+    /// Days in the declared week whose prescribed work has nowhere to go.
+    var scheduleConflicts: [WeeklyDaySnapshot] {
+        days.filter { $0.fit.isConflict && containsInDeclaredWeek($0.date) }
     }
 }
 

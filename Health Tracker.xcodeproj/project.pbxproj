@@ -550,6 +550,7 @@
 				INFOPLIST_KEY_CFBundleName = Today;
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Today reads body weight, sleep, and activity data to show your private trends and daily recap.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Today saves the body weight you enter to Apple Health so your private health record stays complete.";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Today reads the times your calendar is busy so it can tell you where this week's runs and lifts actually fit. Event names are never read, stored, or shared.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Today;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -586,6 +587,7 @@
 				INFOPLIST_KEY_CFBundleName = Today;
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Today reads body weight, sleep, and activity data to show your private trends and daily recap.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Today saves the body weight you enter to Apple Health so your private health record stays complete.";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Today reads the times your calendar is busy so it can tell you where this week's runs and lifts actually fit. Event names are never read, stored, or shared.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Today;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;

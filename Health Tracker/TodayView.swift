@@ -8,6 +8,7 @@ struct TodayView: View {
     @ObservedObject var runService: RunningWorkoutService
     @StateObject private var watchWorkouts = WatchWorkoutService.shared
     @StateObject private var liveActivity = TodayLiveActivityManager.shared
+    @StateObject private var calendarService = CalendarService.shared
 
     private var day: TrainingPlanDay? { planService.today }
     private var weeklySnapshot: WeeklyTrainingSnapshot {
@@ -15,6 +16,10 @@ struct TodayView: View {
             plan: planService.plan,
             runs: runService.workouts,
             lifts: store.workouts
+        )
+        .withSchedule(
+            calendarDays: calendarService.days,
+            recentRuns: runService.workouts
         )
     }
     private var todayProgress: WeeklyDaySnapshot? { weeklySnapshot.day(for: .now) }
@@ -34,6 +39,7 @@ struct TodayView: View {
                     workoutCard
                 }
                 trainingStatus
+                scheduleBrief
                 lockScreenAction
                 if store.activeWorkout == nil {
                     workoutCard
@@ -66,12 +72,48 @@ struct TodayView: View {
         .refreshable {
             async let plan: Void = planService.refresh()
             async let runs: Void = runService.refresh()
-            _ = await (plan, runs)
+            async let schedule: Void = calendarService.refresh()
+            _ = await (plan, runs, schedule)
         }
         .task {
             async let plan: Void = planService.refresh()
             async let exercises: Void = catalog.refreshIfNeeded()
-            _ = await (plan, exercises)
+            // Never prompts. Asking for the calendar on first launch, before the
+            // app has shown what it would do with it, is how a permission gets
+            // refused permanently.
+            async let schedule: Void = calendarService.refresh()
+            _ = await (plan, exercises, schedule)
+        }
+    }
+
+    /// Where today's session fits, and what the week cannot hold.
+    ///
+    /// Silent by design when the week is clear or the calendar was never
+    /// granted. A row that is always present stops being read on the day it
+    /// carries a warning, and an empty calendar must never render as "you have
+    /// all day" — that is the same mistake as an unread Health store showing a
+    /// week of zero miles.
+    @ViewBuilder
+    private var scheduleBrief: some View {
+        let todayLine = todayProgress.flatMap { TrainingBrief.today($0.fit) }
+        let weekLine = TrainingBrief.week(weeklySnapshot)
+
+        if todayLine != nil || weekLine != nil {
+            VStack(alignment: .leading, spacing: 6) {
+                if let todayLine {
+                    Label(todayLine, systemImage: "clock")
+                        .font(.subheadline)
+                        .foregroundStyle(todayProgress?.fit.isConflict == true ? .orange : .secondary)
+                }
+                if let weekLine {
+                    Label(weekLine, systemImage: "exclamationmark.triangle")
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
         }
     }
 
