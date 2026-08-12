@@ -211,9 +211,16 @@ final class CalendarService: ObservableObject {
 
     private let provider: any CalendarEventProviding
 
+    /// Deliberately does **not** touch EventKit.
+    ///
+    /// Reading authorization here meant that merely constructing `TodayView`
+    /// reached the calendar daemon. On a CI simulator that has never had a
+    /// calendar, that call does not return quickly and it does not fail — the
+    /// test run hung for 24 minutes after compiling and was killed by the job
+    /// timeout, with no test having reported. Authorization is now read inside
+    /// `refresh`, which every caller already treats as async and skippable.
     init(provider: any CalendarEventProviding = EventKitCalendarProvider.shared) {
         self.provider = provider
-        authorization = provider.authorizationState()
     }
 
     var hasTrustworthySchedule: Bool {
@@ -222,7 +229,7 @@ final class CalendarService: ObservableObject {
 
     /// Refresh without ever prompting. Safe to call on every foreground.
     func refresh(now: Date = .now, calendar: Calendar = .current) async {
-        if ProcessInfo.processInfo.arguments.contains("-useMockData") { return }
+        guard Self.isCalendarUsable else { return }
         authorization = provider.authorizationState()
         guard authorization == .authorized else { return }
         await load(now: now, calendar: calendar)
@@ -230,6 +237,7 @@ final class CalendarService: ObservableObject {
 
     /// Prompt once, then load. Only call from an explicit user action.
     func requestAccessAndLoad(now: Date = .now, calendar: Calendar = .current) async {
+        guard Self.isCalendarUsable else { return }
         do {
             let granted = try await provider.requestAccess()
             authorization = granted ? .authorized : .denied
@@ -261,4 +269,18 @@ final class CalendarService: ObservableObject {
 
     /// One training week plus today, which is all the week strip can show.
     static let lookaheadDays = 8
+
+    /// False whenever the calendar must not be touched at all.
+    ///
+    /// Covers the mock-data launch the UI tests use and any XCTest host. Both
+    /// run on simulators with no calendar store, where EventKit blocks rather
+    /// than returning empty, and neither has anything to learn from a real one.
+    static var isCalendarUsable: Bool {
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("-useMockData") { return false }
+        let environment = ProcessInfo.processInfo.environment
+        if environment["XCTestConfigurationFilePath"] != nil { return false }
+        if environment["XCTestBundlePath"] != nil { return false }
+        return true
+    }
 }

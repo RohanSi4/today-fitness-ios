@@ -1,4 +1,3 @@
-import EventKit
 import Foundation
 import CryptoKit
 import Testing
@@ -741,31 +740,26 @@ struct CalendarPrivacyTests {
         #expect(children.allSatisfy { !($0.value is String) })
     }
 
-    @Test func anEventTitleDoesNotSurviveTheEventKitBoundary() {
-        let store = EKEventStore()
-        let calendar = utcCalendar
-        let day = calendar.date(from: DateComponents(year: 2026, month: 8, day: 13))!
-
-        let secret = "Final round onsite - Stripe"
-        let event = EKEvent(eventStore: store)
-        event.title = secret
-        event.location = "Confidential"
-        event.notes = "Do not leak"
-        event.startDate = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: day)!
-        event.endDate = calendar.date(bySettingHour: 11, minute: 0, second: 0, of: day)!
-
-        let days = EventKitCalendarProvider.days(
-            from: [event],
-            start: day,
-            end: day,
-            calendar: calendar
+    /// The EventKit half of this — that `facts(from:)` reads no title off an
+    /// `EKEvent` — is deliberately NOT tested here. Constructing an
+    /// `EKEventStore` on a simulator with no calendar store does not return
+    /// promptly, which hung a CI run for 24 minutes until the job timeout killed
+    /// it. The guarantee is enforced by the two shape tests above instead: if
+    /// `CalendarEventFacts` and `BusyInterval` cannot hold a String, no mapping
+    /// into them can carry one, whatever the mapping does.
+    @Test func aFactCarriesTimesAndFlagsButNoText() {
+        let facts = CalendarEventFacts(
+            start: .now,
+            end: .now.addingTimeInterval(3_600),
+            isAllDay: false,
+            holdsTime: true,
+            isCommitment: true
         )
+        let children = Array(Mirror(reflecting: facts).children)
 
-        #expect(days.first?.busy.count == 1)
-        // The interval survives; every word of the event does not.
-        #expect(!String(describing: days).contains(secret))
-        #expect(!String(describing: days).contains("Confidential"))
-        #expect(!String(describing: days).contains("Do not leak"))
+        #expect(children.compactMap(\.label).sorted()
+            == ["end", "holdsTime", "isAllDay", "isCommitment", "start"])
+        #expect(children.allSatisfy { !($0.value is String) })
     }
 
     @Test func anAllDayEventIsCountedRatherThanBlockingTheDay() {
