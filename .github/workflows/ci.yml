@@ -39,7 +39,14 @@ jobs:
   build-and-test:
     name: Build and test
     runs-on: macos-15
-    timeout-minutes: 30
+    # Observed "Run tests" on this job: 9.5, 14.5, and 19.0 minutes across
+    # consecutive runs of the same suite, plus ~5 for the build and ~1.5 to boot
+    # a simulator. At 30 the worst of those lands about four minutes from the
+    # ceiling, and a job that exceeds it is reported as *cancelled*, which reads
+    # like an infrastructure fluke rather than a limit being hit -- so the
+    # failure mode is not just a red run, it is a red run nobody investigates.
+    # Raised for headroom against runner variance, not because the suite grew.
+    timeout-minutes: 45
 
     env:
       PROJECT: Health Tracker.xcodeproj

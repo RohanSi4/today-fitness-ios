@@ -158,3 +158,84 @@ enum ScheduleLoadAnalysis {
         }
     }
 }
+
+// MARK: - Looking forward
+
+/// What history says about days that look like today.
+///
+/// The same join as `ScheduleLoadAnalysis`, asked in the other direction: given
+/// how booked today is, how often did comparable days end with training done.
+///
+/// **This is a base rate, not a prediction.** It says what happened on similar
+/// days, in counts, and stops there. It carries no probability, no risk score,
+/// and no advice, because "68% likely to skip" is a number this sample cannot
+/// support and a number that would immediately be believed.
+enum SkipRisk {
+    /// Comparable days needed before saying anything.
+    ///
+    /// Higher than it looks: this sentence is about *today*, so it is read as
+    /// being about a decision, and a base rate drawn from four days would be
+    /// acted on far more readily than it deserves.
+    static let minimumComparableDays = 8
+
+    /// How close another day's load has to be to count as comparable.
+    ///
+    /// A window rather than a bucket boundary, so a day at 179 minutes and one
+    /// at 181 are not treated as different kinds of day.
+    static let comparableWindowMinutes: Double = 90
+
+    struct Outlook: Equatable, Sendable {
+        let comparableDays: Int
+        let trainedDays: Int
+        let busyMinutesToday: Double
+
+        /// Only worth surfacing when history actually leans. A 4-of-8 split is
+        /// a coin, and presenting a coin as insight is how the feature earns
+        /// being ignored.
+        var isNoteworthy: Bool {
+            guard comparableDays > 0 else { return false }
+            let rate = Double(trainedDays) / Double(comparableDays)
+            return rate <= 0.4 || rate >= 0.85
+        }
+    }
+
+    static func outlook(
+        forBusyMinutes today: Double,
+        history: [ScheduleLoadDay]
+    ) -> Outlook? {
+        let comparable = history.filter {
+            abs($0.busyMinutes - today) <= comparableWindowMinutes
+        }
+        guard comparable.count >= minimumComparableDays else { return nil }
+
+        return Outlook(
+            comparableDays: comparable.count,
+            trainedDays: comparable.filter(\.trained).count,
+            busyMinutesToday: today
+        )
+    }
+
+    /// Counts only, phrased as history rather than forecast.
+    static func sentence(_ outlook: Outlook) -> String {
+        "On \(outlook.comparableDays) past days about this booked "
+            + "(\(ScheduleLoadAnalysis.hours(outlook.busyMinutesToday))), "
+            + "you trained \(outlook.trainedDays)."
+    }
+
+    /// Committed minutes inside today's training band, for comparison against
+    /// history. Uses the same measure the history was built with, so a day is
+    /// never compared against a differently-defined version of itself.
+    static func busyMinutes(
+        today: CalendarDay,
+        date: Date,
+        calendar: Calendar = .current
+    ) -> Double {
+        let bounds = TrainingWindowPlanner.bounds(for: date, calendar: calendar)
+        let committed = TrainingWindowPlanner.merge(today.busy).reduce(0.0) { total, interval in
+            let start = max(interval.start, bounds.start)
+            let end = min(interval.end, bounds.end)
+            return total + max(0, end.timeIntervalSince(start))
+        }
+        return committed / 60
+    }
+}

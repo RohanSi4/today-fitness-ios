@@ -111,12 +111,33 @@ struct TodayView: View {
         }
     }
 
+    /// What history says about days as booked as this one.
+    ///
+    /// Only shown when the prescribed work is at risk of not happening anyway,
+    /// and only when history actually leans. On an ordinary day it is noise,
+    /// and a line that appears every morning is one he stops reading.
+    private var skipOutlookLine: String? {
+        guard let today = calendarService.day(for: .now) else { return nil }
+        let minutes = SkipRisk.busyMinutes(today: today, date: .now)
+        let history = ScheduleLoadAnalysis.days(
+            calendarDays: calendarService.days,
+            runs: runService.workouts,
+            lifts: store.workouts
+        )
+        guard
+            let outlook = SkipRisk.outlook(forBusyMinutes: minutes, history: history),
+            outlook.isNoteworthy
+        else { return nil }
+        return SkipRisk.sentence(outlook)
+    }
+
     @ViewBuilder
     private var grantedBrief: some View {
         let todayLine = todayProgress.flatMap { TrainingBrief.today($0.fit) }
         let weekLine = TrainingBrief.week(weeklySnapshot)
+        let outlookLine = skipOutlookLine
 
-        if todayLine != nil || weekLine != nil {
+        if todayLine != nil || weekLine != nil || outlookLine != nil {
             VStack(alignment: .leading, spacing: 6) {
                 if let todayLine {
                     Label(todayLine, systemImage: "clock")
@@ -127,6 +148,11 @@ struct TodayView: View {
                     Label(weekLine, systemImage: "exclamationmark.triangle")
                         .font(.footnote)
                         .foregroundStyle(.orange)
+                }
+                if let outlookLine {
+                    Label(outlookLine, systemImage: "chart.bar")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
