@@ -95,6 +95,24 @@ struct TodayView: View {
     /// week of zero miles.
     @ViewBuilder
     private var scheduleBrief: some View {
+        // Nothing prescribed means nothing to fit, and no reason to ask for a
+        // permission whose value cannot be demonstrated yet.
+        let hasPrescribedWork = todayProgress.map {
+            $0.plannedRunMiles != nil || $0.plannedLift != nil
+        } ?? false
+
+        switch calendarService.authorization {
+        case .authorized:
+            grantedBrief
+        case .notDetermined where hasPrescribedWork:
+            calendarInvitation
+        case .notDetermined, .denied:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private var grantedBrief: some View {
         let todayLine = todayProgress.flatMap { TrainingBrief.today($0.fit) }
         let weekLine = TrainingBrief.week(weeklySnapshot)
 
@@ -115,6 +133,31 @@ struct TodayView: View {
             .padding(12)
             .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
         }
+    }
+
+    /// The opt-in.
+    ///
+    /// Deliberately not shown on first launch and never triggered by `.task`.
+    /// iOS grants exactly one prompt: once it is refused the app cannot ask
+    /// again, only send him to Settings. So the ask waits until there is a
+    /// prescribed session on screen, where the sentence explains something he
+    /// can already see the need for, and it says what is read — times, not
+    /// names — because that is the actual objection.
+    private var calendarInvitation: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Fit training around your week", systemImage: "calendar")
+                .font(.subheadline.weight(.semibold))
+            Text("Today can check your calendar for a gap long enough to actually run in. It reads busy times only, never event names, and nothing about your calendar leaves this phone.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            Button("Use my calendar") {
+                Task { await calendarService.requestAccessAndLoad() }
+            }
+            .buttonStyle(.bordered)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var lockScreenAction: some View {

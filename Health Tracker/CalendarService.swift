@@ -267,6 +267,25 @@ final class CalendarService: ObservableObject {
         days.first { calendar.isDate($0.date, inSameDayAs: date) }
     }
 
+    /// When the day's first real commitment starts, if there is one.
+    ///
+    /// All-day entries are excluded, as everywhere else: a birthday does not
+    /// mean he has to be up early. Used to decide how early the morning weight
+    /// prompt has to be — see `NotificationManager.morningReminder`.
+    func firstCommitment(on date: Date, calendar: Calendar = .current) -> Date? {
+        day(for: date, calendar: calendar)?.busy.map(\.start).min()
+    }
+
+    /// First commitment per day key, in the shape the reminder scheduler wants.
+    func firstCommitmentsByDayKey(calendar: Calendar = .current) -> [String: Date] {
+        var result: [String: Date] = [:]
+        for day in days {
+            guard let first = day.busy.map(\.start).min() else { continue }
+            result[NotificationManager.dayKey(for: day.date, calendar: calendar)] = first
+        }
+        return result
+    }
+
     /// One training week plus today, which is all the week strip can show.
     static let lookaheadDays = 8
 

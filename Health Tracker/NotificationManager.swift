@@ -12,7 +12,7 @@ protocol RecapNotificationScheduling: Sendable {
 
 protocol WeightReminderScheduling: Sendable {
     func requestAuthorization() async -> Bool
-    func scheduleWeightReminders(from date: Date, days: Int) async
+    func scheduleWeightReminders(from date: Date, days: Int, firstCommitments: [String: Date]) async
     func cancelWeightReminders(for date: Date)
 }
 
@@ -86,7 +86,14 @@ final class NotificationManager: NSObject, RecapNotificationScheduling, WeightRe
         try? await center.add(request)
     }
 
-    func scheduleWeightReminders(from date: Date = Date(), days: Int = 30) async {
+    /// `firstCommitments` maps a day key to that day's first commitment, so the
+    /// morning prompt can land before he has to be somewhere. Empty by default:
+    /// the calendar is optional and every caller predates it.
+    func scheduleWeightReminders(
+        from date: Date = Date(),
+        days: Int = 30,
+        firstCommitments: [String: Date] = [:]
+    ) async {
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
         guard settings.authorizationStatus == .authorized ||
@@ -105,13 +112,18 @@ final class NotificationManager: NSObject, RecapNotificationScheduling, WeightRe
         for offset in 0..<Self.reminderDayCount(requested: days) {
             guard let day = calendar.date(byAdding: .day, value: offset, to: today) else { continue }
             let dayKey = Self.dayKey(for: day)
+            let morning = Self.morningReminder(
+                on: day,
+                firstCommitment: firstCommitments[dayKey],
+                calendar: calendar
+            )
             await scheduleWeightReminder(
                 identifier: "\(Self.weightReminderPrefix).morning.\(dayKey)",
                 title: "Morning check-in",
                 body: "Log your weight while the scale is right there.",
                 day: day,
-                hour: 8,
-                minute: 30,
+                hour: morning.hour ?? Self.defaultMorningHour,
+                minute: morning.minute ?? Self.defaultMorningMinute,
                 center: center
             )
             await scheduleWeightReminder(
@@ -129,6 +141,57 @@ final class NotificationManager: NSObject, RecapNotificationScheduling, WeightRe
     func cancelWeightReminders(for date: Date) {
         UNUserNotificationCenter.current()
             .removePendingNotificationRequests(withIdentifiers: Self.weightReminderIDs(for: date))
+    }
+
+    // MARK: Morning timing
+
+    /// The default morning prompt, and the earliest it may ever be moved to.
+    static let defaultMorningHour = 8
+    static let defaultMorningMinute = 30
+    static let earliestMorningHour = 6
+
+    /// How long before the first commitment the prompt has to land.
+    ///
+    /// Long enough to get up, weigh in, and start getting ready. A prompt that
+    /// arrives while he is already out the door is a prompt he swipes away.
+    static let morningLeadTime: TimeInterval = 45 * 60
+
+    /// What time to ask for weight on a given day.
+    ///
+    /// Only ever moves the prompt **earlier**. A day whose first meeting is at
+    /// 4pm should still ask at 8:30, because the reminder is about catching the
+    /// scale in the morning routine, not about the meeting. And it never moves
+    /// before `earliestMorningHour`: a 6:30am flight should not turn into a
+    /// 5:45am notification, which is how someone disables notifications for good.
+    ///
+    /// Pure, so the rule can be tested without a calendar or a notification
+    /// permission.
+    static func morningReminder(
+        on day: Date,
+        firstCommitment: Date?,
+        calendar: Calendar = .current
+    ) -> DateComponents {
+        let fallback = DateComponents(hour: defaultMorningHour, minute: defaultMorningMinute)
+        guard
+            let firstCommitment,
+            calendar.isDate(firstCommitment, inSameDayAs: day),
+            let defaultTime = calendar.date(
+                bySettingHour: defaultMorningHour,
+                minute: defaultMorningMinute,
+                second: 0,
+                of: day
+            ),
+            let floor = calendar.date(
+                bySettingHour: earliestMorningHour, minute: 0, second: 0, of: day
+            )
+        else { return fallback }
+
+        let wanted = firstCommitment.addingTimeInterval(-morningLeadTime)
+        guard wanted < defaultTime else { return fallback }
+
+        let chosen = max(wanted, floor)
+        let parts = calendar.dateComponents([.hour, .minute], from: chosen)
+        return DateComponents(hour: parts.hour, minute: parts.minute)
     }
 
     /// iOS keeps 64 pending local notifications and silently drops the rest.

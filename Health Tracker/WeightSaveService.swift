@@ -134,7 +134,16 @@ enum WeightSaveService {
     ) async {
         reminders.cancelWeightReminders(for: date)
         guard await reminders.requestAuthorization() else { return }
-        await reminders.scheduleWeightReminders(from: Date(), days: 30)
+        // Read once here rather than inside the scheduler so the scheduler stays
+        // free of any calendar dependency and keeps working with none granted.
+        let firstCommitments = await MainActor.run {
+            CalendarService.shared.firstCommitmentsByDayKey()
+        }
+        await reminders.scheduleWeightReminders(
+            from: Date(),
+            days: 30,
+            firstCommitments: firstCommitments
+        )
         // Scheduling the next stretch re-adds today, so clear it again.
         reminders.cancelWeightReminders(for: date)
     }

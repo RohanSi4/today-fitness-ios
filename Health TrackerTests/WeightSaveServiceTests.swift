@@ -283,7 +283,7 @@ private final class StubReminders: WeightReminderScheduling, @unchecked Sendable
 
     func requestAuthorization() async -> Bool { true }
 
-    func scheduleWeightReminders(from date: Date, days: Int) async {
+    func scheduleWeightReminders(from date: Date, days: Int, firstCommitments: [String: Date]) async {
         scheduledDayCounts.append(days)
     }
 
