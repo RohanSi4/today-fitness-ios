@@ -885,6 +885,71 @@ struct WeeklyTrainingSnapshotTests {
         #expect(!json.contains("184.4"))
     }
 
+    /// The bug this covers: on 2026-08-11 he ran the prescribed 7 miles and the
+    /// Lock Screen went on reciting "THRESHOLD SESSION #2, 7mi total" all
+    /// evening. `recap` only ever knew about lifts, and the widget renders
+    /// `recap?.summary ?? planLine`, so a run-only day could never clear the
+    /// prescription no matter how completely he had done it.
+    @Test func aFinishedRunClearsThePlanLineTheWayAFinishedLiftDoes() throws {
+        let calendar = utcCalendar
+        let now = try #require(date("2026-07-22T18:00:00Z"))
+        let start = try #require(date("2026-07-22T14:00:00Z"))
+        let run = RunningWorkoutSummary(
+            id: UUID(),
+            startedAt: start,
+            endedAt: start.addingTimeInterval(3_709),
+            miles: 7.0,
+            duration: 3_709
+        )
+        let week = WeeklyTrainingBuilder.build(
+            plan: samplePlan(todayText: "7 mile threshold session"),
+            runs: [run],
+            lifts: [],
+            now: now,
+            calendar: calendar
+        )
+        let day = week.day(for: now, calendar: calendar)
+        #expect(day?.runCompleted == true)
+
+        let recap = try #require(
+            TodayWidgetPublisher.recap(lift: nil, day: day, catalog: ExerciseCatalog())
+        )
+        #expect(recap.title == "Run")
+        #expect(recap.summary == "7.00 mi · 1h 1m")
+        // Still no load and no rep count, which the run recap must not reopen.
+        let json = try #require(
+            String(data: JSONEncoder().encode(recap), encoding: .utf8)
+        ).lowercased()
+        #expect(!json.contains("lb"))
+        #expect(!json.contains("reps"))
+    }
+
+    /// The other half of the rule. Half a prescription is not a finished day,
+    /// and swapping the plan line for "3.10 mi" would tell him he was done when
+    /// he still owed four miles.
+    @Test func aPartialRunLeavesThePlanLineStanding() throws {
+        let calendar = utcCalendar
+        let now = try #require(date("2026-07-22T18:00:00Z"))
+        let start = try #require(date("2026-07-22T14:00:00Z"))
+        let run = RunningWorkoutSummary(
+            id: UUID(),
+            startedAt: start,
+            endedAt: start.addingTimeInterval(1_800),
+            miles: 3.1,
+            duration: 1_800
+        )
+        let week = WeeklyTrainingBuilder.build(
+            plan: samplePlan(todayText: "7 mile threshold session"),
+            runs: [run],
+            lifts: [],
+            now: now,
+            calendar: calendar
+        )
+        let day = week.day(for: now, calendar: calendar)
+        #expect(day?.runCompleted == false)
+        #expect(TodayWidgetPublisher.recap(lift: nil, day: day, catalog: ExerciseCatalog()) == nil)
+    }
+
     /// A plan and a recap both describe the day that just ended, so a rollover
     /// must drop them. Carrying them would have the widget recommending
     /// yesterday's lift over breakfast and calling it today's.

@@ -82,15 +82,22 @@ struct TodayWidgetWorkout: Codable, Equatable {
 /// and what today's session came to.
 struct TodayWidgetRecap: Codable, Equatable {
     let title: String
-    let sets: Int
-    let durationLabel: String?
+    /// Lifts only. Optional because a run has no sets, and a run is the other
+    /// thing a day can come to.
+    var sets: Int?
+    /// Runs only. Never a load or a rep count, so this stays inside the same
+    /// privacy line the rest of the payload holds.
+    var miles: Double?
+    var durationLabel: String?
     /// "Chest · Back", from the same region rollup History shows.
-    let regions: String?
+    var regions: String?
 
-    /// "17 sets · 1h 32m · Chest · Back", dropping whatever is missing rather
-    /// than leaving separators stranded.
+    /// "17 sets · 1h 32m · Chest · Back", or "7.00 mi · 1h 2m", dropping
+    /// whatever is missing rather than leaving separators stranded.
     var summary: String {
-        var parts = ["\(sets) \(sets == 1 ? "set" : "sets")"]
+        var parts: [String] = []
+        if let miles { parts.append(String(format: "%.2f mi", miles)) }
+        if let sets { parts.append("\(sets) \(sets == 1 ? "set" : "sets")") }
         if let durationLabel { parts.append(durationLabel) }
         if let regions, !regions.isEmpty { parts.append(regions) }
         return parts.joined(separator: " · ")

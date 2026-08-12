@@ -157,16 +157,13 @@ enum TodayLiveActivityStateBuilder {
             planLine: plan?.days.first {
                 $0.date == TodayWidgetSnapshot.dayKey(for: now, calendar: calendar)
             }?.text,
-            recap: store.workouts
-                .first { calendar.isDate($0.endedAt ?? $0.startedAt, inSameDayAs: now) }
-                .map { session in
-                    TodayWidgetRecap(
-                        title: session.workoutTitle,
-                        sets: session.completedSetCount,
-                        durationLabel: session.durationLabel,
-                        regions: WorkoutMuscleCoverage.regionSummary(for: session, catalog: catalog)
-                    )
+            recap: TodayWidgetPublisher.recap(
+                lift: store.workouts.first {
+                    calendar.isDate($0.endedAt ?? $0.startedAt, inSameDayAs: now)
                 },
+                day: day,
+                catalog: catalog
+            ),
             now: now,
             calendar: calendar
         )

@@ -375,18 +375,55 @@ enum TodayWidgetPublisher {
             week: week,
             workout: workout,
             planLine: planLine,
-            recap: finishedLift.map { session in
-                TodayWidgetRecap(
-                    title: session.workoutTitle,
-                    sets: session.completedSetCount,
-                    durationLabel: session.durationLabel,
-                    regions: WorkoutMuscleCoverage.regionSummary(for: session, catalog: catalog)
-                )
-            },
+            recap: recap(lift: finishedLift, day: day, catalog: catalog),
             now: now,
             calendar: calendar
         )
         return (snapshot, day, week)
+    }
+
+    /// What today came to, for the idle widget to hand back.
+    ///
+    /// One builder on purpose. The Live Activity used to assemble this itself,
+    /// and a second copy of a rule is how the two surfaces disagree.
+    ///
+    /// A finished RUN has to clear the plan line the same way a finished lift
+    /// does. Without that the Lock Screen kept reciting "THRESHOLD SESSION #2,
+    /// 7mi total" hours after the 7 miles were on the watch, because `recap`
+    /// only knew about lifts while `planLine` is published unconditionally.
+    ///
+    /// Lift wins when both happened: it is the longer session and the one whose
+    /// detail he cannot reconstruct from memory. A PARTIAL run does not qualify
+    /// at all, because he still owes the rest and the plan line is still true.
+    static func recap(
+        lift: WorkoutSession?,
+        day: WeeklyDaySnapshot?,
+        catalog: ExerciseCatalog
+    ) -> TodayWidgetRecap? {
+        if let lift {
+            return TodayWidgetRecap(
+                title: lift.workoutTitle,
+                sets: lift.completedSetCount,
+                durationLabel: lift.durationLabel,
+                regions: WorkoutMuscleCoverage.regionSummary(for: lift, catalog: catalog)
+            )
+        }
+        guard let day, let run = day.run,
+              day.plannedRunMiles == nil || day.runCompleted else { return nil }
+        return TodayWidgetRecap(
+            title: "Run",
+            miles: run.miles,
+            durationLabel: runDurationLabel(run.duration)
+        )
+    }
+
+    /// Matches `WorkoutSession.durationLabel` so a run recap and a lift recap
+    /// read the same way on the same line.
+    static func runDurationLabel(_ duration: TimeInterval) -> String? {
+        guard duration > 0 else { return nil }
+        let minutes = max(1, Int(duration / 60))
+        if minutes < 60 { return "\(minutes)m" }
+        return "\(minutes / 60)h \(minutes % 60)m"
     }
 
     static func makeSnapshot(
