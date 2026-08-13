@@ -430,6 +430,13 @@ enum TodayWidgetPublisher {
         // tomorrow's run every evening.
         let todayKey = TodayWidgetSnapshot.dayKey(for: now, calendar: calendar)
         let planLine = plan?.days.first { $0.date == todayKey }?.text
+        // Published a day early so the widget can roll past midnight on its own.
+        // The extension has no read path to the plan, so anything it is going to
+        // say tomorrow morning has to be in the payload before he puts the phone
+        // down tonight.
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: now)
+        let tomorrowKey = tomorrow.map { TodayWidgetSnapshot.dayKey(for: $0, calendar: calendar) }
+        let tomorrowPlanLine = tomorrowKey.flatMap { key in plan?.days.first { $0.date == key }?.text }
         let finishedLift = store.workouts.first {
             calendar.isDate($0.endedAt ?? $0.startedAt, inSameDayAs: now)
         }
@@ -441,6 +448,8 @@ enum TodayWidgetPublisher {
             workout: workout,
             planLine: planLine,
             recap: recap(lift: finishedLift, day: day, catalog: catalog),
+            tomorrowDateKey: tomorrowPlanLine == nil ? nil : tomorrowKey,
+            tomorrowPlanLine: tomorrowPlanLine,
             now: now,
             calendar: calendar
         )
@@ -498,6 +507,8 @@ enum TodayWidgetPublisher {
         workout: TodayWidgetWorkout? = nil,
         planLine: String? = nil,
         recap: TodayWidgetRecap? = nil,
+        tomorrowDateKey: String? = nil,
+        tomorrowPlanLine: String? = nil,
         now: Date = .now,
         calendar: Calendar = .current
     ) -> TodayWidgetSnapshot {
@@ -528,7 +539,9 @@ enum TodayWidgetPublisher {
             weekEndKey: TodayWidgetSnapshot.dayKey(for: week.endDate, calendar: calendar),
             workout: workout,
             planLine: planLine,
-            recap: recap
+            recap: recap,
+            tomorrowDateKey: tomorrowDateKey,
+            tomorrowPlanLine: tomorrowPlanLine
         )
     }
 

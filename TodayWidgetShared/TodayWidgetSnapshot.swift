@@ -142,6 +142,20 @@ struct TodayWidgetSnapshot: Codable, Equatable {
     /// Today's finished lift, if there is one.
     var recap: TodayWidgetRecap?
 
+    /// Tomorrow's session, published a day early so the widget can roll over to
+    /// it without the app.
+    ///
+    /// The extension cannot derive this: the plan comes from the coach and lives
+    /// in the host app's store, which the widget has no read path to. Without it
+    /// the carried-forward day could only offer a generic prompt, so the first
+    /// thing the Lock Screen said every morning was strictly less than it knew.
+    ///
+    /// Keyed by its own date rather than trusted blindly. A payload written three
+    /// days ago carries a "tomorrow" that is now in the past, and rendering that
+    /// as today's session is the exact failure this type keeps avoiding.
+    var tomorrowDateKey: String?
+    var tomorrowPlanLine: String?
+
     static var placeholder: TodayWidgetSnapshot {
         TodayWidgetSnapshot(
             generatedAt: .now,
@@ -266,13 +280,17 @@ struct TodayWidgetSnapshot: Codable, Equatable {
         }
 
         // Same week, new day: keep the totals, reset the prompt to the first
-        // thing he does every morning.
+        // thing he does every morning. The weight prompt still leads - it is the
+        // one thing that has to happen before he leaves - but the detail line
+        // carries the actual session instead of "see what is on for today",
+        // which the payload already knew and was throwing away.
+        let rolled = tomorrowDateKey == today ? tomorrowPlanLine : nil
         return TodayWidgetSnapshot(
             generatedAt: generatedAt,
             dateKey: today,
             phase: .weight,
             headline: "Log morning weight",
-            detail: "Then see what is on for today",
+            detail: rolled ?? "Then see what is on for today",
             symbolName: "scalemass.fill",
             deepLink: URL(string: "today://weight")!,
             week: week,
@@ -282,8 +300,13 @@ struct TodayWidgetSnapshot: Codable, Equatable {
             // Both are strictly about the day that just ended. Carrying them
             // would have the widget recommending yesterday's lift over breakfast
             // and calling it today's.
-            planLine: nil,
-            recap: nil
+            planLine: rolled,
+            recap: nil,
+            // One day of lookahead only. Consuming it here and leaving it set
+            // would let the same line be re-served as "tomorrow" again the next
+            // morning, ageing forward one day at a time.
+            tomorrowDateKey: nil,
+            tomorrowPlanLine: nil
         )
     }
 

@@ -228,3 +228,103 @@ struct WidgetStalenessTests {
         #expect(loaded == stored)
     }
 }
+
+/// The lookahead that lets the Lock Screen roll past midnight on its own.
+///
+/// The bug these cover: on a new morning the widget said "Lower B done" - the
+/// previous evening's recap - because the day rollover was left entirely to a
+/// WidgetKit reload the system is free to defer. Deferring it is legal, so the
+/// rollover cannot depend on it.
+struct WidgetLookaheadTests {
+    private static let utc = TimeZone(identifier: "UTC")!
+
+    private func calendar() -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = Self.utc
+        return calendar
+    }
+
+    private func date(_ year: Int, _ month: Int, _ day: Int, hour: Int = 9) -> Date {
+        var components = DateComponents()
+        components.year = year; components.month = month; components.day = day; components.hour = hour
+        return calendar().date(from: components)!
+    }
+
+    /// Wednesday evening: a finished lift, and tomorrow's run already published.
+    private func wednesdayEvening(
+        tomorrowKey: String?,
+        tomorrowLine: String?,
+        calendar: Calendar
+    ) -> TodayWidgetSnapshot {
+        let day = date(2026, 8, 12, hour: 21)
+        return TodayWidgetSnapshot(
+            generatedAt: day,
+            dateKey: TodayWidgetSnapshot.dayKey(for: day, calendar: calendar),
+            phase: .done,
+            headline: "Lower B done",
+            detail: "11 sets",
+            symbolName: "checkmark",
+            deepLink: URL(string: "today://week")!,
+            week: TodayWidgetWeek(completedMiles: 17, plannedMiles: 40, completedRuns: 3, completedLifts: 2),
+            weekStartKey: TodayWidgetSnapshot.dayKey(for: date(2026, 8, 10), calendar: calendar),
+            weekEndKey: TodayWidgetSnapshot.dayKey(for: date(2026, 8, 16), calendar: calendar),
+            planLine: "Lower B",
+            recap: nil,
+            tomorrowDateKey: tomorrowKey,
+            tomorrowPlanLine: tomorrowLine
+        )
+    }
+
+    @Test func theMorningAfterShowsTomorrowsSessionRatherThanAGenericPrompt() throws {
+        let calendar = calendar()
+        let stored = wednesdayEvening(tomorrowKey: "2026-08-13", tomorrowLine: "5 mile run", calendar: calendar)
+
+        let carried = try #require(stored.carriedForward(to: date(2026, 8, 13), calendar: calendar))
+
+        #expect(carried.detail == "5 mile run")
+        #expect(carried.planLine == "5 mile run")
+        // The weight prompt still leads: it is the one thing that has to happen
+        // before he leaves the house.
+        #expect(carried.headline == "Log morning weight")
+        // And the thing he actually complained about.
+        #expect(carried.headline != "Lower B done")
+        #expect(carried.recap == nil)
+    }
+
+    @Test func aLookaheadThatIsNoLongerTomorrowIsNotShown() throws {
+        // A payload two days old carries a "tomorrow" that is now in the past.
+        // Rendering it as today's session would be worse than saying nothing.
+        let calendar = calendar()
+        let stored = wednesdayEvening(tomorrowKey: "2026-08-13", tomorrowLine: "5 mile run", calendar: calendar)
+
+        let carried = try #require(stored.carriedForward(to: date(2026, 8, 14), calendar: calendar))
+
+        #expect(carried.detail == "Then see what is on for today")
+        #expect(carried.planLine == nil)
+    }
+
+    @Test func theLookaheadIsConsumedSoItCannotAgeForward() throws {
+        // Left set, the same line would be re-served as "tomorrow" again the
+        // next morning, walking one day further from the truth each time.
+        let calendar = calendar()
+        let stored = wednesdayEvening(tomorrowKey: "2026-08-13", tomorrowLine: "5 mile run", calendar: calendar)
+
+        let carried = try #require(stored.carriedForward(to: date(2026, 8, 13), calendar: calendar))
+
+        #expect(carried.tomorrowDateKey == nil)
+        #expect(carried.tomorrowPlanLine == nil)
+    }
+
+    @Test func aPayloadWithNoLookaheadStillRollsOverCleanly() throws {
+        // Older builds published no lookahead at all, and an upgrade must not
+        // turn that into a crash or a stale recap.
+        let calendar = calendar()
+        let stored = wednesdayEvening(tomorrowKey: nil, tomorrowLine: nil, calendar: calendar)
+
+        let carried = try #require(stored.carriedForward(to: date(2026, 8, 13), calendar: calendar))
+
+        #expect(carried.detail == "Then see what is on for today")
+        #expect(carried.headline == "Log morning weight")
+        #expect(carried.recap == nil)
+    }
+}

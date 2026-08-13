@@ -22,8 +22,28 @@ private struct TodayWidgetProvider: TimelineProvider {
     func getTimeline(in context: Context, completion: @escaping (Timeline<TodayWidgetEntry>) -> Void) {
         let now = Date()
         let snapshot = TodayWidgetSnapshot.load() ?? .fallback
-        let entry = TodayWidgetEntry(date: now, snapshot: snapshot)
-        completion(Timeline(entries: [entry], policy: .after(refreshDate(for: snapshot, after: now))))
+        var entries = [TodayWidgetEntry(date: now, snapshot: snapshot)]
+
+        // The midnight entry is pre-rendered rather than left to the reload.
+        //
+        // A one-entry timeline plus `.after(midnight)` puts the whole day
+        // rollover behind a refresh the system is free to defer, and when it
+        // defers, the Lock Screen spends the morning insisting yesterday's lift
+        // is the news. WidgetKit swaps to an entry it already holds without
+        // waking the extension at all, so booking the rolled-over day in advance
+        // makes the rollover happen on time whatever the refresh budget is doing.
+        //
+        // `carriedForward` is the same function the load path uses, so the
+        // pre-rendered day cannot drift from the one a live reload would build.
+        if let midnight = Calendar.current.nextDate(
+            after: now,
+            matching: DateComponents(hour: 0, minute: 0, second: 0),
+            matchingPolicy: .nextTime
+        ), let rolled = snapshot.carriedForward(to: midnight) {
+            entries.append(TodayWidgetEntry(date: midnight, snapshot: rolled))
+        }
+
+        completion(Timeline(entries: entries, policy: .after(refreshDate(for: snapshot, after: now))))
     }
 
     /// While a lift is open the app pushes a reload on every checked set, so the
