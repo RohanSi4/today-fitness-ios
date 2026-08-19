@@ -20,7 +20,6 @@ protocol RunningWorkoutProviding: Sendable {
     var isHealthDataAvailable: Bool { get }
     func requestWorkoutAuthorization() async throws
     func fetchRunningWorkouts(start: Date, end: Date) async throws -> [RunningWorkoutSummary]
-    func startWorkoutMonitoring(onChange: @escaping @Sendable () -> Void)
 }
 
 @MainActor
@@ -41,7 +40,6 @@ final class RunningWorkoutService: ObservableObject {
     @Published private(set) var lastReadFailed = false
 
     private let healthStore: any RunningWorkoutProviding
-    private var isMonitoring = false
 
     init(healthStore: any RunningWorkoutProviding = HealthKitManager.shared) {
         self.healthStore = healthStore
@@ -60,19 +58,12 @@ final class RunningWorkoutService: ObservableObject {
         if ProcessInfo.processInfo.arguments.contains("-useMockData") { return }
         guard healthStore.isHealthDataAvailable else { return }
 
-        // Authorization first. Background delivery cannot be enabled before the
-        // Health prompt is answered, so registering the observer first meant a fresh
-        // install silently never got watch runs delivered in the background.
+        // This is the call that actually shows the Health prompt, because it is
+        // the first one to run with a UI attached. `App.init` re-registers the
+        // workout observer once it resolves - observing is owned there, since
+        // that is the only code that runs on a background launch, and a watch run
+        // syncing to a locked phone is exactly a background launch.
         try? await healthStore.requestWorkoutAuthorization()
-
-        if !isMonitoring {
-            isMonitoring = true
-            healthStore.startWorkoutMonitoring { [weak self] in
-                Task { @MainActor in
-                    await self?.refresh()
-                }
-            }
-        }
         await refresh()
     }
 
@@ -344,6 +335,12 @@ enum WeeklyTrainingBuilder {
 
 @MainActor
 enum TodayWidgetPublisher {
+    /// - Returns: whether a payload actually reached the widget. False means the
+    ///   Lock Screen is still showing whatever it showed before, which after a
+    ///   run has just landed is a stale prompt for work already done. Callers on
+    ///   a background wake must not treat that as finished - see
+    ///   `TodayWidgetRefresh`, which is what retries it.
+    @discardableResult
     static func publish(
         store: TodayStore,
         plan: TrainingPlan?,
@@ -352,7 +349,7 @@ enum TodayWidgetPublisher {
         catalog: ExerciseCatalog,
         now: Date = .now,
         calendar: Calendar = .current
-    ) {
+    ) -> Bool {
         guard let publication = makePublication(
             store: store,
             plan: plan,
@@ -361,11 +358,11 @@ enum TodayWidgetPublisher {
             catalog: catalog,
             now: now,
             calendar: calendar
-        ) else { return }
+        ) else { return false }
         let snapshot = publication.snapshot
 
         guard let defaults = UserDefaults(suiteName: TodayWidgetSnapshot.appGroupIdentifier),
-              let data = try? JSONEncoder().encode(snapshot) else { return }
+              let data = try? JSONEncoder().encode(snapshot) else { return false }
         defaults.removeObject(forKey: TodayWidgetSnapshot.legacyDefaultsKey)
         defaults.set(data, forKey: TodayWidgetSnapshot.defaultsKey)
         WidgetCenter.shared.reloadTimelines(ofKind: TodayWidgetSnapshot.widgetKind)
@@ -380,6 +377,7 @@ enum TodayWidgetPublisher {
         Task {
             await TodayLiveActivityManager.shared.updateIfPresented(with: liveState)
         }
+        return true
     }
 
     /// Nil when the store could not read its file. A background launch on a locked

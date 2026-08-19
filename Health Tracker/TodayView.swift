@@ -612,5 +612,4 @@ private struct PreviewRunningWorkoutProvider: RunningWorkoutProviding {
     let isHealthDataAvailable = false
     func requestWorkoutAuthorization() async throws {}
     func fetchRunningWorkouts(start: Date, end: Date) async throws -> [RunningWorkoutSummary] { [] }
-    func startWorkoutMonitoring(onChange: @escaping @Sendable () -> Void) {}
 }

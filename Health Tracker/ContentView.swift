@@ -147,13 +147,18 @@ struct ContentView: View {
         )
         if onlyIfWorkoutChanged, workout == publishedWorkout { return }
         publishedWorkout = workout
-        TodayWidgetPublisher.publish(
+        let published = TodayWidgetPublisher.publish(
             store: store,
             plan: planService.plan,
             runs: runService.workouts,
             workout: workout,
             catalog: catalog
         )
+        // Settles whatever a background wake could not. Without this a single
+        // locked-phone failure would leave the retry armed for the rest of the
+        // day, spending a budgeted widget reload on every unlock to restate a
+        // Lock Screen this call has already made correct.
+        if published { TodayWidgetRefresh.shared.clearPending() }
     }
 
     /// - Parameter ensuring: add the card if it is not there, rather than only

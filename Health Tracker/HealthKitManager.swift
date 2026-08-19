@@ -349,7 +349,7 @@ final class HealthKitManager: HealthDataProviding, BodyWeightHealthStoring, Body
         // and both `execute` a query: one observer leaks, and every wake fires
         // its callback twice. Building the query first is free, since an
         // `HKObserverQuery` does nothing until it is executed.
-        guard claimObserverSlot(isSleep: true, query: query) else {
+        guard claimSleepObserverSlot(query: query) else {
             enableBackgroundDelivery(for: sleepType, isSleep: true)
             return
         }
@@ -357,32 +357,72 @@ final class HealthKitManager: HealthDataProviding, BodyWeightHealthStoring, Body
         enableBackgroundDelivery(for: sleepType, isSleep: true)
     }
 
-    /// Claims the single observer slot for this type, returning false if another
-    /// caller already holds it.
-    private func claimObserverSlot(isSleep: Bool, query: HKObserverQuery) -> Bool {
+    /// Claims the single sleep observer slot, returning false if another caller
+    /// already holds it.
+    ///
+    /// Claim-once rather than replaceable because sleep has exactly one
+    /// registration site, in `App.init`, and no authorization ordering to
+    /// re-register around. Workouts have two and swap instead - see
+    /// `startWorkoutMonitoring`.
+    private func claimSleepObserverSlot(query: HKObserverQuery) -> Bool {
         withMonitorLock {
-            if isSleep {
-                guard sleepObserverQuery == nil else { return false }
-                sleepObserverQuery = query
-            } else {
-                guard workoutObserverQuery == nil else { return false }
-                workoutObserverQuery = query
-            }
+            guard sleepObserverQuery == nil else { return false }
+            sleepObserverQuery = query
             return true
         }
     }
 
-    func startWorkoutMonitoring(onChange: @escaping @Sendable () -> Void) {
+    func startWorkoutMonitoring(onChange: @escaping @Sendable () async -> Void) {
         let workoutType = HKWorkoutType.workoutType()
         let query = HKObserverQuery(sampleType: workoutType, predicate: nil) { _, completion, error in
-            defer { completion() }
-            guard error == nil else { return }
-            onChange()
+            guard error == nil else {
+                completion()
+                return
+            }
+
+            // `completion()` is carried into the work rather than fired beside
+            // it, the same way the sleep observer above carries its own.
+            //
+            // It used to run in a `defer` on this line, which meant it fired
+            // synchronously *before* `onChange` had done anything at all -
+            // that handler only started a detached `Task` and returned. Calling
+            // it is what releases the background assertion keeping this wake
+            // alive, so the widget publish was left racing a suspension the app
+            // had already told the system it no longer needed. A watch run that
+            // landed while the phone was locked is exactly that wake, and losing
+            // it there is unrecoverable: HealthKit counts a completed handler as
+            // delivered and never sends the update again.
+            //
+            // The unsafe shadow states HealthKit's contract - call me exactly
+            // once, from wherever you finish - which the type cannot express,
+            // and the `defer` is what guarantees the once.
+            nonisolated(unsafe) let completion = completion
+            Task {
+                defer { completion() }
+                await onChange()
+            }
         }
-        guard claimObserverSlot(isSleep: false, query: query) else {
-            enableBackgroundDelivery(for: workoutType, isSleep: false)
-            return
+        // Replaceable, unlike the sleep slot, because the two registrations here
+        // are deliberately ordered against each other.
+        //
+        // `App.init` registers on every launch including the background launches
+        // that carry a watch run, and it has to do that before the Health prompt
+        // could possibly have been answered - a background launch cannot show
+        // one. HealthKit does not deliver to an observer executed against an
+        // undetermined authorization, so on a fresh install that registration is
+        // inert, and the post-authorization one is the only one that works.
+        //
+        // A claim-once slot let the inert query hold the seat for the life of the
+        // process and silently refused the good one. That is the "fresh install
+        // never got watch runs in the background" failure the ordering exists to
+        // prevent, reintroduced one layer down. Swapping under a single lock
+        // acquisition is what keeps two concurrent callers from both executing.
+        let previous = withMonitorLock { () -> HKObserverQuery? in
+            let previous = workoutObserverQuery
+            workoutObserverQuery = query
+            return previous
         }
+        if let previous { store.stop(previous) }
         store.execute(query)
         enableBackgroundDelivery(for: workoutType, isSleep: false)
     }

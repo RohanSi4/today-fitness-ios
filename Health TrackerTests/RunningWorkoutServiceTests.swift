@@ -120,5 +120,4 @@ private final class StubRunProvider: RunningWorkoutProviding, @unchecked Sendabl
         return try result.get()
     }
 
-    func startWorkoutMonitoring(onChange: @escaping @Sendable () -> Void) {}
 }
