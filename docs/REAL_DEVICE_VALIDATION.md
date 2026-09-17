@@ -4,6 +4,15 @@ Simulator and CI results do not validate HealthKit, signed Keychain access,
 notifications, App Group/widget propagation, WorkoutKit, or a paired Apple Watch.
 This is the release gate for those paths. A blank row means **not verified**.
 
+## Simulator regression update, September 9, 2026
+
+The local weight-save durability fix passed `WeightSaveServiceTests` and
+`StoreDataSafetyTests` on an iPhone 17 Pro simulator. The new test forces a real
+filesystem failure, checks the pending outcome and absence of Health/reminder
+side effects, retries, then reloads the saved reading from disk. This is local
+source verification, not a signed phone installation. No physical gate below
+was promoted to passed on the basis of these results.
+
 ## Run record
 
 | Field | Value |

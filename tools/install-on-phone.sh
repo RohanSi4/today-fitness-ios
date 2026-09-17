@@ -16,8 +16,18 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# MATCH THE UDID BY SHAPE, NOT BY COLUMN. This read $3 of a whitespace-split row
+# until 2026-09-17, when Xcode 27 returned a device whose Hostname cell was empty.
+# `-F'  +'` collapses the gap, every field shifts one left, and $3 became the State
+# column — so DEVICE was the literal string "available (paired)". xcodebuild then
+# failed with "Unable to find a device matching the provided destination specifier"
+# and printed the whole simulator catalogue, which reads like a project
+# misconfiguration and says nothing about the phone. A UDID has a fixed shape;
+# column positions do not.
 DEVICE=$(xcrun devicectl list devices 2>/dev/null \
-  | awk -F'  +' '/iPhone/ && (/available/ || /connected/) && !/unavailable/ {print $3; exit}')
+  | grep iPhone | grep -E 'available|connected' | grep -v unavailable \
+  | grep -oE '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}|[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}' \
+  | head -1)
 
 if [ -z "$DEVICE" ]; then
   echo "No iPhone available." >&2

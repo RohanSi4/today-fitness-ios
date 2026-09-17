@@ -217,7 +217,7 @@ struct WeightLogView: View {
         )
 
         switch outcome {
-        case .rejected(let reason):
+        case .rejected(let reason), .pending(let reason):
             errorMessage = reason
         case .saved(.written), .saved(.unavailable):
             // Opportunistic and unrelated to storing the weight, so it happens

@@ -4,6 +4,47 @@ import Testing
 
 @MainActor
 struct WeightSaveServiceTests {
+    @Test func failedDiskWriteStaysPendingUntilRetryIsDurable() async throws {
+        let directory = temporaryURL("blocked-directory")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        // A regular file where the parent directory belongs forces a real write failure.
+        try Data("blocked".utf8).write(to: directory)
+        let url = directory.appendingPathComponent("weights.json")
+        let store = TodayStore(storageURL: url, calendar: utcCalendar)
+        let health = StubHealthStore()
+        let reminders = StubReminders()
+
+        let outcome = await WeightSaveService.save(
+            pounds: 184.4, on: day, store: store, healthStore: health,
+            reminders: reminders, calendar: utcCalendar
+        )
+        guard case .pending = outcome else {
+            Issue.record("An in-memory reading must not be reported as saved: \(outcome)")
+            return
+        }
+        #expect(store.hasUnsavedChanges)
+        #expect(store.weights.first?.pounds == 184.4)
+        #expect(!FileManager.default.fileExists(atPath: url.path))
+        #expect(health.authorizationRequests == 0)
+        #expect(health.savedPounds.isEmpty)
+        #expect(reminders.cancelledDates.isEmpty)
+        #expect(reminders.scheduledDayCounts.isEmpty)
+
+        try FileManager.default.removeItem(at: directory)
+        let retried = await WeightSaveService.save(
+            pounds: 184.4, on: day, store: store, healthStore: health,
+            reminders: reminders, calendar: utcCalendar
+        )
+        #expect(retried == .saved(health: .written))
+        #expect(!store.hasUnsavedChanges)
+        #expect(health.savedPounds == [184.4])
+        #expect(!reminders.cancelledDates.isEmpty)
+        let reloaded = TodayStore(storageURL: url, calendar: utcCalendar)
+        #expect(reloaded.weights.count == 1)
+        #expect(reloaded.weights.first?.pounds == 184.4)
+        #expect(reloaded.weights.first?.healthKitID == store.weights.first?.healthKitID)
+    }
+
     /// The regression this whole file exists for. Health access denied, or
     /// granted once and revoked later in Settings, used to jump straight past
     /// `recordWeight` and lose the reading he had just typed.

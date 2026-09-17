@@ -5,6 +5,8 @@ enum WeightSaveOutcome: Equatable {
     /// Nothing was written and nothing existing was touched. The sheet stays
     /// open so he can fix the number.
     case rejected(reason: String)
+    /// The reading exists only in memory. Keep the sheet open for a retry.
+    case pending(reason: String)
     /// The reading is on disk. Apple Health may or may not have a copy.
     case saved(health: HealthWriteResult)
 }
@@ -56,8 +58,7 @@ enum WeightSaveService {
         let replacedEntry = store.weights.first {
             calendar.isDate($0.date, inSameDayAs: date)
         }
-        // The reading lands on disk before anything that can throw. Everything
-        // after this point is best effort and cannot cost him the number.
+        // Attempt local persistence before contacting Health or clearing reminders.
         store.recordWeight(pounds, on: date)
 
         // `recordWeight` drops implausible values silently, so confirm it landed
@@ -68,6 +69,9 @@ enum WeightSaveService {
             calendar.isDate($0.date, inSameDayAs: date) && $0.pounds == pounds
         }) else {
             return .rejected(reason: "That does not look like a body weight. Check the number and try again.")
+        }
+        guard !store.hasUnsavedChanges else {
+            return .pending(reason: "Your weight is still in memory, but Today could not save it on this phone. Keep the app open and try Save again.")
         }
 
         let health = await writeToHealth(

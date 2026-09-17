@@ -19,7 +19,7 @@ final class TodayStore: ObservableObject {
 
     /// True between a save that did not reach disk and the next one that does. The
     /// old code told the owner "it will try again" and then never did.
-    private var hasUnsavedChanges = false
+    private(set) var hasUnsavedChanges = false
 
     /// Whether the in-memory archive actually came from disk. Anything that
     /// publishes this state outside the app - the widget above all - has to check
@@ -611,12 +611,8 @@ final class TodayStore: ObservableObject {
                 syncService.scheduleSync(snapshot: value, catalog: .shared)
             }
         } catch {
-            // assertionFailure alone compiles out of Release, so on a real phone every
-            // failed save was invisible. Surface it, since HistoryView already shows
-            // this message.
-            assertionFailure("Could not persist Today data: \(error)")
-            // Flagged so `reloadIfUnreadable` can actually make good on the promise
-            // below the next time the app comes to the foreground.
+            // I/O failures are recoverable: surface them without trapping in Debug,
+            // and retry when the app next comes to the foreground.
             hasUnsavedChanges = true
             dataRecoveryMessage = "Today could not save your latest changes. They are still here in the app, and it will try again."
         }
